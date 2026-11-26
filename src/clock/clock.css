@@ -105,4 +105,14 @@ time { font-variant-numeric: tabular-nums; display: inline-block; margin: 7px 0;
 #snapshot-dialog::backdrop { background: #10091cdb; }
 #snapshot-dialog form { width: auto; }
 #snapshot-image { width: 100%; height: auto; display: block; background: #120d1c; }
+.help-grid { align-items: start; }
+.help-grid h3 { margin-bottom: 10px; }
+.help-grid details { padding: 11px 0; border-top: 1px solid var(--line); font-size: .9rem; }
+.help-grid details > p { margin: 9px 0 0; color: var(--muted); }
+.help-grid summary { cursor: pointer; font-weight: 700; }
+.help-grid ol, .help-grid ul { padding-left: 1.4rem; line-height: 1.5; }
+.help-grid li + li { margin-top: 3px; }
+.help-grid pre { max-width: 100%; overflow: auto; padding: 10px; border-radius: 6px; background: var(--field); }
+.api-requests dt { margin-top: 8px; font-weight: 650; }
+.api-requests dd { margin: 2px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 @media (max-width: 540px) { .masthead { gap: 8px; } nav { order: 3; flex-basis: 100%; } .section-heading { align-items: start; } }

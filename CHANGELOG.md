@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Add offline console and API help with short procedures, HTTPS examples and common request bodies.
+
 ## 0.2.5
 
 - Stage signed application updates from a local file or a configurable GitHub repository and branch. Install on restart with a previous-version fallback and rollback.

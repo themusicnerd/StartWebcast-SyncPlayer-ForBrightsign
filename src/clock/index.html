@@ -10,7 +10,7 @@
 <body>
   <header class="masthead">
     <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><img src="/startwebcast.png" alt="" width="38" height="27">StartWebcast SyncPlayer</a>
-    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#library">Media Library</a><a href="#sources">Sources &amp; Layers</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a></nav>
+    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#library">Media Library</a><a href="#sources">Sources &amp; Layers</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
     <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button></div>
   </header>
   <main>
@@ -89,6 +89,106 @@
     </section>
 
     <section class="panel section" id="activity" aria-labelledby="activity-title"><div class="panel-heading"><h2 id="activity-title">Activity</h2><a href="/api/v1/status">Status JSON</a></div><ul class="activity" id="events"><li>Waiting for player activity.</li></ul></section>
+
+    <section class="section" id="help" aria-labelledby="help-title">
+      <div class="section-heading"><h2 id="help-title">Help</h2></div>
+      <div class="grid grid-halves help-grid">
+        <article class="panel" aria-labelledby="console-help-title">
+          <h3 id="console-help-title">Use the Console</h3>
+          <details open><summary>Play and Control Media</summary><ol>
+            <li>Open <a href="#overview">Overview</a>.</li>
+            <li>Select <strong>Play Built-In</strong> to start the presentation.</li>
+            <li>Select <strong>Pause</strong> to hold the current frame.</li>
+            <li>Select <strong>Resume</strong> to continue.</li>
+            <li>Select <strong>Play Locally</strong> to use the playhead on this player.</li>
+            <li>Drag the playhead to a new position in the local MP4.</li>
+          </ol><p>The playhead reads the native player once per second. Group Pause and Resume require all included players online.</p></details>
+          <details><summary>Set the Group</summary><ol>
+            <li>Open <a href="#settings">Settings</a>.</li>
+            <li>In <strong>Playback Mode &amp; PTP</strong>, select <strong>Leader</strong>, <strong>Follower</strong> or <strong>Standalone</strong>.</li>
+            <li>Use the same group name and PTP domain on each group player.</li>
+            <li>Select <strong>Save Mode &amp; PTP</strong>.</li>
+            <li>On the leader, open <a href="#overview">Overview</a>.</li>
+            <li>In <strong>Group Membership</strong>, select an available follower.</li>
+            <li>Select <strong>Add Player</strong>.</li>
+          </ol><p>Prepare the follower’s card and peer credentials before you add it.</p></details>
+          <details><summary>Upload and Distribute a Clip</summary><ol>
+            <li>Open <a href="#library">Media Library</a> on the leader.</li>
+            <li>Use one MP4 for each group member. For example, use <code>Welcome_A.mp4</code>.</li>
+            <li>Select the MP4 files.</li><li>Select <strong>Upload</strong>.</li>
+            <li>Select <strong>Distribute</strong> on the saved version.</li>
+            <li>Wait for all group members to finish.</li><li>Select <strong>Play Group</strong>.</li>
+          </ol></details>
+          <details><summary>Set the Display and Clock</summary><ol>
+            <li>Select <strong>Power On</strong> or <strong>Standby</strong> in the top bar.</li>
+            <li>Read <strong>TV On</strong>, <strong>TV Off</strong> or <strong>TV Unknown</strong> after the display responds.</li>
+            <li>Select <strong>Snapshot</strong> to see the player output.</li>
+            <li>Open <a href="#settings">Settings</a> to set the clock or schedule.</li>
+            <li>Select <strong>Use This Computer’s Time</strong> to copy your computer’s time to the player.</li>
+            <li>In <strong>Clock &amp; Schedule</strong>, select or clear <strong>Enable Display Schedule</strong>.</li>
+            <li>Select <strong>Save Schedule</strong>.</li>
+          </ol><p>The saved times use the Sydney time zone. A follower uses the leader’s schedule during group playback.</p></details>
+          <details><summary>Set HDMI, Audio and Network Time</summary><ol>
+            <li>Open <a href="#settings">Settings</a>.</li>
+            <li>Select an output resolution in <strong>HDMI &amp; Audio</strong>.</li>
+            <li>Set the volume or select <strong>Mute</strong>.</li>
+            <li>Select <strong>Save HDMI &amp; Audio</strong>.</li>
+            <li>In <strong>Network Time</strong>, enter the NTP server to use.</li>
+            <li>Select <strong>Save NTP</strong>.</li>
+          </ol><p>A resolution change restarts playback. A follower’s audio stays muted during group playback.</p></details>
+          <details><summary>Set Sources, Layers and Lighting</summary><ol>
+            <li>Open <a href="#sources">Sources &amp; Layers</a>.</li>
+            <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
+            <li>Enter the URL. Select <strong>Play Source</strong>.</li>
+            <li>Set the window position and size. Select <strong>Apply Window</strong>.</li>
+            <li>Enter the HTML5 overlay URL. Select <strong>Apply Overlay</strong>.</li>
+            <li>Open <a href="#lighting">Lighting</a> to set the Art-Net or sACN input.</li>
+          </ol></details>
+          <details><summary>Install an App Update</summary><ol>
+            <li>Open <a href="#updates">Updates</a>.</li>
+            <li>Stage a signed file or fetch the package from GitHub.</li>
+            <li>Check the staged version.</li>
+            <li>Select <strong>Install and Restart</strong>.</li>
+            <li>Wait for the player to start. Check the running version.</li>
+          </ol></details>
+        </article>
+        <article class="panel" id="api-help" aria-labelledby="api-help-title">
+          <h3 id="api-help-title">API Help</h3>
+          <details open><summary>Connect to a Player</summary><ol>
+            <li>Use HTTPS on port <code>8080</code>.</li>
+            <li>Trust the player’s public <code>clock-cert.pem</code> certificate.</li>
+            <li>Use HTTP Basic authentication with the console credentials.</li>
+            <li>Use <code>/api/v1</code> before each endpoint path.</li>
+            <li>Include <code>X-SyncPlayer-Request: control</code> in each request that changes a setting or starts an action.</li>
+            <li>Use <code>Content-Type: application/json</code> when you send JSON.</li>
+          </ol></details>
+          <details open><summary>Read Player Status</summary>
+            <p>Use the player’s IP address in the request. This example uses Player A. Enter the console password when prompted.</p>
+            <pre><code>curl.exe --cacert clock-cert.pem --user SyncPlayer https://192.168.1.11:8080/api/v1/status</code></pre>
+            <p>Read the <code>native</code> object for the role, playback state, software version and HDMI power status.</p>
+          </details>
+          <details><summary>Send a Power Request</summary>
+            <ol><li>Save <code>{"power":"on"}</code> to <code>power.json</code>.</li><li>Send this request from the directory with <code>power.json</code>.</li><li>Wait five seconds. Read player status to check the HDMI power report.</li></ol>
+            <pre><code>curl.exe --cacert clock-cert.pem --user SyncPlayer -H "X-SyncPlayer-Request: control" -H "Content-Type: application/json" --data-binary "@power.json" https://192.168.1.11:8080/api/v1/display-power</code></pre>
+          </details>
+          <details><summary>Common Requests</summary>
+            <dl class="api-requests">
+              <dt>GET <code>/status</code></dt><dd>Read player status.</dd>
+              <dt>GET <code>/playback</code></dt><dd>Read the playhead position in milliseconds.</dd>
+              <dt>GET <code>/clock</code></dt><dd>Read the clock and time zone.</dd>
+              <dt>POST <code>/play</code></dt><dd>Send <code>{"id":"presentation"}</code> to play the built-in presentation.</dd>
+              <dt>POST <code>/pause</code>, <code>/resume</code> or <code>/stop</code></dt><dd>Send <code>{}</code>.</dd>
+              <dt>POST <code>/seek</code></dt><dd>Send <code>{"positionMs":30000}</code> to move a local MP4 to 30 seconds.</dd>
+              <dt>PUT <code>/group/members/B</code></dt><dd>Send <code>{"included":true}</code> to add provisioned Player B.</dd>
+              <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
+              <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
+              <dt>GET <code>/updates</code></dt><dd>Read the running version and GitHub source.</dd>
+            </dl>
+          </details>
+          <details><summary>Read the Response</summary><ul><li>Use the result after an HTTP <code>200</code> response.</li><li>For <code>202</code>, wait for the task to finish. Read status again.</li><li>For <code>401</code>, check the credentials.</li><li>For <code>403</code>, check the control header.</li><li>For <code>409</code>, read the error. Check the player state before you retry.</li></ul></details>
+        </article>
+      </div>
+    </section>
   </main>
   <dialog id="snapshot-dialog" class="panel" aria-labelledby="snapshot-title"><div class="panel-heading"><h2 id="snapshot-title">Screen Snapshot</h2><form method="dialog"><button type="submit" class="secondary" autofocus>Close</button></form></div><img id="snapshot-image" alt="Captured Player Output"></dialog>
   <aside id="feedback" class="toast" role="status" aria-live="polite" hidden></aside>
