@@ -1,4 +1,4 @@
-"""Create the leader's private clock web credentials and HTTPS certificate."""
+"""Create one player's private web credentials and HTTPS certificate."""
 
 import argparse
 import getpass
@@ -15,16 +15,16 @@ import tempfile
 
 def provision(card, username, password, openssl):
     config = json.loads((card / "syncplayer.json").read_text(encoding="utf-8"))
-    if config["card_player_id"] != config["leader_id"]:
-        raise ValueError("Select the leader's card directory")
     address = ipaddress.IPv4Address(config["static_ipv4"]["address"])
+    if config["players"].get(str(address)) != config["card_player_id"]:
+        raise ValueError("Select a valid player card directory")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,40}", username):
         raise ValueError("Use 1–40 letters, digits, dots, dashes or underscores for the username")
     if not re.fullmatch(r"[!-~]{8,128}", password):
         raise ValueError("Use 8–128 printable ASCII characters for the password")
     destination = card / "clock"
     if not (destination / "server.js").is_file():
-        raise ValueError("Copy the clock app to the leader card before provisioning it")
+        raise ValueError("Copy the management app to the card before provisioning it")
     if (destination / "credentials.json").exists():
         raise ValueError("This card already has clock credentials")
 

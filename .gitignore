@@ -10,3 +10,4 @@ dws-password.txt
 clock-key.pem
 clock-cert.pem
 credentials.json
+peer-credentials.json

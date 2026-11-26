@@ -1,11 +1,13 @@
 'use strict';
 
-const { randomBytes, scrypt, timingSafeEqual } = require('node:crypto');
+const { createHash, randomBytes, scrypt, timingSafeEqual } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const { createServer } = require('node:https');
 const { join } = require('node:path');
 const { performance } = require('node:perf_hooks');
 const { promisify } = require('node:util');
+const { RequestError } = require('./library');
+const { Suite } = require('./suite');
 
 const deriveKey = promisify(scrypt);
 const protocol = 'start-syncplayer-clock-v1';
@@ -33,7 +35,8 @@ function clockRequest(port) {
     }, 22000);
     pending = { id, timer, resolve };
     try {
-      port.PostBSMessage({ protocol, id, action, utc });
+      const fields = typeof utc === 'object' ? utc : { utc };
+      port.PostBSMessage({ protocol, id, action, ...fields });
     } catch (error) {
       clearTimeout(timer);
       pending = undefined;
@@ -83,13 +86,14 @@ async function readUpdate(request) {
   return toUtc(input);
 }
 
-function makeServer({ host, port, tls, credentials, requestClock }) {
+function makeServer({ host, port, tls, credentials, requestClock, suite }) {
   const authority = `${host}:${port}`;
   const origin = `https://${authority}`;
   const assets = new Map([
     ['/', ['text/html; charset=utf-8', 'index.html']],
     ['/clock.js', ['text/javascript; charset=utf-8', 'clock.js']],
     ['/clock.css', ['text/css; charset=utf-8', 'clock.css']],
+    ['/startwebcast.png', ['image/png', 'startwebcast.png']],
   ].map(([url, [type, file]]) => [url, [type, readFileSync(join(__dirname, file))]]));
   const { username, salt, digest } = credentials;
   if (typeof username !== 'string' || !/^[A-Za-z0-9_.-]{1,40}$/.test(username) ||
@@ -102,14 +106,20 @@ function makeServer({ host, port, tls, credentials, requestClock }) {
   let checks = 0;
   let failed = 0;
   let resetAt = 0;
+  let lastLogin;
+  let expires = 0;
 
   async function serve(request, response) {
     if (request.headers.host !== authority) return json(response, 400, { error: 'Use the player address.' });
+    const url = new URL(request.url, origin);
+    if (url.origin !== origin) return json(response, 400, { error: 'Use the player address.' });
+    if (suite && url.pathname.startsWith('/peer/v1/')) return suite.peer(request, response, url, json);
     const login = /^Basic ([A-Za-z0-9+/=]{4,256})$/i.exec(request.headers.authorization || '');
     const supplied = login ? Buffer.from(login[1], 'base64').toString('utf8') : '';
     const prefix = `${username}:`;
-    let authorised = false;
-    if (supplied.startsWith(prefix)) {
+    const loginDigest = supplied ? createHash('sha256').update(supplied).digest() : null;
+    let authorised = Boolean(loginDigest && lastLogin && performance.now() < expires && timingSafeEqual(loginDigest, lastLogin));
+    if (!authorised && supplied.startsWith(prefix)) {
       const now = performance.now();
       if (now >= resetAt) {
         failed = 0;
@@ -121,6 +131,10 @@ function makeServer({ host, port, tls, credentials, requestClock }) {
         const candidate = await deriveKey(supplied.slice(prefix.length), keySalt, knownDigest.length);
         authorised = timingSafeEqual(candidate, knownDigest);
         if (!authorised) failed += 1;
+        if (authorised) {
+          lastLogin = loginDigest;
+          expires = now + 60000;
+        }
       } finally {
         checks -= 1;
       }
@@ -133,7 +147,14 @@ function makeServer({ host, port, tls, credentials, requestClock }) {
 
     const asset = assets.get(request.url);
     if (request.method === 'GET' && asset) return send(response, 200, ...asset);
-    if (request.url !== '/api/v1/clock') return json(response, 404, { error: 'Page not found.' });
+    if (request.method !== 'GET' && (request.headers['x-syncplayer-request'] !== 'control' &&
+        request.headers['x-syncplayer-request'] !== 'clock' || (request.headers.origin && request.headers.origin !== origin))) {
+      return json(response, 403, { error: 'Use the StartWebcast SyncPlayer interface or its authenticated API.' });
+    }
+    if (request.url !== '/api/v1/clock') {
+      if (suite && url.pathname.startsWith('/api/v1/')) return suite.operator(request, response, url, json);
+      return json(response, 404, { error: 'Page not found.' });
+    }
     if (!['GET', 'PUT'].includes(request.method)) {
       return json(response, 405, { error: 'Method not allowed.' }, { Allow: 'GET, PUT' });
     }
@@ -141,9 +162,6 @@ function makeServer({ host, port, tls, credentials, requestClock }) {
     let action = 'get';
     let utc = '';
     if (request.method === 'PUT') {
-      if (request.headers.origin !== origin || request.headers['x-syncplayer-request'] !== 'clock') {
-        return json(response, 403, { error: 'Open the clock page on this player.' });
-      }
       let instant;
       try {
         instant = await readUpdate(request);
@@ -165,8 +183,12 @@ function makeServer({ host, port, tls, credentials, requestClock }) {
   }
 
   const server = createServer({ ...tls, minVersion: 'TLSv1.2', maxHeaderSize: 4096 }, (request, response) => {
-    serve(request, response).catch(() => {
-      if (!response.headersSent && !response.destroyed) json(response, 503, { error: 'The player clock is busy or unavailable. Try again.' });
+    serve(request, response).catch((error) => {
+      if (!response.headersSent && !response.destroyed) {
+        request.resume();
+        if (error instanceof RequestError) json(response, error.status, { error: error.message });
+        else json(response, 503, { error: 'The player is busy or unavailable. Try again.' });
+      }
     });
   });
   server.maxConnections = 12;
@@ -184,9 +206,19 @@ if (require.main === module) {
       key: readFileSync(join(__dirname, 'clock-key.pem')),
     };
     const credentials = JSON.parse(readFileSync(join(__dirname, 'credentials.json'), 'utf8'));
-    const server = makeServer({ host, port, tls, credentials, requestClock: clockRequest(new MessagePort()) });
-    server.on('error', () => console.error('Start SyncPlayer clock server could not start.'));
-    server.listen(port, host, () => console.log(`Start SyncPlayer clock listening on ${host}:${port}`));
+    const config = JSON.parse(readFileSync(join(__dirname, '..', 'syncplayer.json'), 'utf8'));
+    let exchange = {};
+    try { exchange = JSON.parse(readFileSync(join(__dirname, 'peer-credentials.json'), 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const requestClock = clockRequest(new MessagePort());
+    const suite = new Suite({ host, config, root: join(__dirname, '..', 'library'), native: requestClock, exchange });
+    const server = makeServer({ host, port, tls, credentials, requestClock, suite });
+    server.on('error', () => console.error('StartWebcast SyncPlayer server could not start.'));
+    suite.init().then(() => {
+      server.listen(port, host, () => console.log(`StartWebcast SyncPlayer listening on ${host}:${port}`));
+      void suite.refresh();
+      setInterval(() => void suite.refresh(), 5000).unref();
+    });
   } catch {
     console.error('Start SyncPlayer clock server setup failed.');
   }

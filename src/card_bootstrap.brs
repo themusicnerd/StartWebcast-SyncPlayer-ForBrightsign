@@ -1,7 +1,7 @@
 Sub Main()
     m.root = GetDefaultDrive()
     m.bootReport = ""
-    BootNote("Start SyncPlayer 0.1.6 card boot")
+    BootNote("StartWebcast SyncPlayer 0.2.2 card boot")
     port = CreateObject("roMessagePort")
     StartCard(port)
     While true

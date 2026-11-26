@@ -3,28 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Player clock | Start SyncPlayer</title>
+  <title>StartWebcast SyncPlayer</title>
   <link rel="stylesheet" href="/clock.css">
   <script src="/clock.js" defer></script>
 </head>
 <body>
+  <header class="masthead">
+    <a class="brand" href="#overview"><img src="/startwebcast.png" alt="" width="38" height="27">StartWebcast SyncPlayer</a>
+    <nav aria-label="Player console"><a href="#overview">Overview</a><a href="#library">Media library</a><a href="#sources">Sources &amp; layers</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#activity">Activity</a></nav>
+    <span class="status-pill" id="connection">Connecting</span>
+  </header>
   <main>
-    <header>Start SyncPlayer</header>
-    <h1>Player clock</h1>
-    <p>The leader uses Sydney time for the display schedule.</p>
-    <section aria-labelledby="current-label">
-      <h2 id="current-label">Current time in Sydney</h2>
-      <p><time id="current">Checking the player clock…</time></p>
-      <button type="button" id="computer" disabled>Use this computer’s time</button>
-    </section>
-    <form id="manual">
-      <label for="sydney">Set date and time manually (Sydney)</label>
-      <div class="field">
-        <input id="sydney" type="datetime-local" min="2020-01-02T00:00" max="2037-12-31T23:59" required>
-        <button id="save" type="submit" disabled>Set time</button>
+    <section id="overview" aria-labelledby="overview-title" class="section">
+      <div class="section-heading"><div><h1 id="overview-title">Player overview</h1><p id="identity">Reading player status…</p></div><button id="refresh" class="secondary" type="button">Refresh status</button></div>
+      <div class="grid overview-grid">
+        <article class="panel playback">
+          <div class="panel-heading"><h2>Playback</h2><span class="status-pill" id="playback-state">Starting</span></div>
+          <h3 class="source-name" id="source-name">—</h3>
+          <div class="timeline"><progress id="position" value="0" max="1" aria-label="Playback position"></progress><span id="position-label">—</span></div>
+          <div class="actions"><button type="button" data-command="built-in">Play built-in</button><button type="button" class="secondary" data-command="restart">Restart</button><button type="button" class="secondary" data-command="stop">Stop</button><button type="button" class="secondary" data-command="blackout">Blackout</button><label class="check"><input type="checkbox" id="loop"> Loop</label></div>
+          <p class="feedback" id="playback-error"></p>
+        </article>
+        <article class="panel"><div class="panel-heading"><h2>Players</h2><span class="status-pill" id="sync-summary">Sync unmeasured</span></div><div class="player-grid" id="players"></div><p id="storage" class="muted">Reading SD card…</p></article>
       </div>
-    </form>
-    <p id="status" role="status"></p>
+    </section>
+
+    <div class="grid work-grid">
+      <section class="panel section" id="library" aria-labelledby="library-title">
+        <div class="panel-heading"><h2 id="library-title">Media library</h2><span id="library-count" class="muted"></span></div>
+        <form id="upload">
+          <label class="drop" id="drop" for="media-files"><strong>Drop MP4 files or choose files</strong><span>Use names like Welcome_A.mp4, Welcome_B.mp4 and Welcome_C.mp4.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,.mp4"></label>
+          <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace draft files</label></div>
+          <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload progress"></progress><span id="upload-label"></span></div>
+        </form>
+        <div class="library-list" id="items"><p class="muted">Built-in Presentation is available from Playback.</p></div>
+        <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear distribution</button></div>
+      </section>
+      <section class="panel section" id="sources" aria-labelledby="sources-title">
+        <div class="panel-heading"><h2 id="sources-title">Sources &amp; layers</h2></div>
+        <div class="layout" aria-label="Output layout diagram"><div id="layout-rect"></div><span id="layout-label">Lower layer</span></div>
+        <form id="source-form" class="stack">
+          <h3>Lower layer</h3><p>Play the built-in presentation or a library clip, or load a live source on this player.</p>
+          <div class="form-row"><label>Source<select name="type"><option value="srt">SRT feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" placeholder="srt://encoder:9000?mode=caller" required></label><button type="submit">Play source</button></div>
+        </form>
+        <form id="window-form" class="stack">
+          <h3>Lower-layer window</h3><div class="form-row dimensions"><label>Left %<input type="number" name="x" min="0" max="95" required></label><label>Top %<input type="number" name="y" min="0" max="95" required></label><label>Width %<input type="number" name="width" min="5" max="100" required></label><label>Height %<input type="number" name="height" min="5" max="100" required></label><button type="submit" class="secondary">Apply window</button></div>
+        </form>
+        <form id="overlay-form" class="stack">
+          <div class="panel-heading"><h3>Upper layer · HTML5 overlay</h3><span class="muted" id="overlay-state">Off</span></div>
+          <div class="form-row"><label class="grow">Overlay URL<input type="url" name="url" spellcheck="false" placeholder="https://server/overlay.html"></label><button type="submit" class="secondary">Apply overlay</button><button id="clear-overlay" class="secondary" type="button">Clear</button></div>
+        </form>
+      </section>
+    </div>
+
+    <section class="section" id="settings" aria-labelledby="settings-title">
+      <div class="section-heading"><h2 id="settings-title">Device settings</h2></div>
+      <div class="grid settings-grid">
+        <article class="panel"><form id="av-form" class="stack"><h3>HDMI &amp; audio</h3><label>Output resolution<select name="output"><option value="3840x2160x50p">3840 × 2160 · 50 Hz</option><option value="1920x1080x50p">1920 × 1080 · 50 Hz</option></select></label><div class="form-row"><label class="grow">Volume <output id="volume-label"></output><input type="range" name="volume" min="0" max="100"></label><label class="check"><input type="checkbox" name="muted"> Mute</label></div><p id="audio-owner" class="muted"></p><button type="submit">Save HDMI &amp; audio</button></form></article>
+        <article class="panel"><form id="role-form" class="stack"><h3>Playback mode &amp; PTP</h3><div class="form-row"><label class="grow">Mode<select name="role"><option value="leader">Leader</option><option value="follower">Follower</option><option value="standalone">Standalone</option></select></label><label class="grow">Leader player<select name="leader"></select></label></div><div class="form-row"><label class="grow">Sync group name<input name="group" type="text" maxlength="48" pattern="[a-z0-9\-]+" required></label><label>PTP domain<input name="domain" type="number" min="0" max="127" required></label></div><p id="ptp-use" class="muted">Reading PTP announcements…</p><button type="submit">Save mode &amp; PTP</button></form></article>
+        <article class="panel"><h3>Clock &amp; schedule</h3><p><time id="current">Reading Sydney time…</time></p><div class="actions"><button type="button" class="secondary" id="computer">Use this computer’s time</button></div><form id="manual" class="stack"><div class="form-row"><label class="grow">Sydney date and time<input id="sydney" type="datetime-local" required></label><button id="save" type="submit" class="secondary">Set time</button></div></form><form id="schedule-form" class="stack"><div class="form-row"><label>Daily wake<input name="on" type="time" required></label><label>Daily standby<input name="off" type="time" required></label><button type="submit" class="secondary">Save schedule</button></div></form></article>
+        <article class="panel"><form id="ntp-form" class="stack"><h3>Network time</h3><label>NTP server<input type="text" name="ntp" spellcheck="false" placeholder="ntp://time.example.local"></label><label>Update interval (seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
+      </div>
+    </section>
+
+    <section class="section" id="lighting" aria-labelledby="lighting-title">
+      <div class="section-heading"><h2 id="lighting-title">Lighting &amp; colour</h2><span id="lighting-state" class="status-pill">Off</span></div>
+      <div class="grid settings-grid">
+        <article class="panel"><form id="colour-form" class="stack"><h3>Native video colour</h3><div class="form-row dimensions"><label>Brightness<input type="number" name="brightness" min="-1000" max="1000" value="0" required></label><label>Hue<input type="number" name="hue" min="-1000" max="1000" value="0" required></label><label>Saturation<input type="number" name="saturation" min="-1000" max="1000" value="0" required></label></div><div class="actions"><button type="submit">Apply colour</button><button type="button" class="secondary" id="neutral-colour">Neutral</button></div></form></article>
+        <article class="panel"><form id="lighting-form" class="stack"><h3>Console input</h3><label>Protocol<select name="protocol"><option value="off">Off</option><option value="sacn">sACN multicast</option><option value="artnet">Art-Net unicast</option></select></label><label>Allowed console IP<input name="source" type="text" placeholder="192.168.1.50" spellcheck="false"></label><div class="form-row"><label>Universe<input name="universe" type="number" min="0" max="63999" required></label><label>First channel<input name="channel" type="number" min="1" max="508" required></label></div><p id="lighting-info">Five channels control brightness, hue, saturation, clip, and transport.</p><button type="submit">Save console input</button></form></article>
+        <article class="panel"><form id="slot-form" class="stack"><h3>DMX media slots</h3><p>Slot 0 plays the built-in presentation.</p><div class="form-row"><label>Slot<input type="number" name="slot" min="1" max="255" value="1" required></label><label class="grow">Media<select name="media"><option value="">Unassigned</option></select></label><button type="submit" class="secondary">Save slot</button></div><ol id="slot-list" class="activity"></ol></form></article>
+      </div>
+    </section>
+
+    <section class="panel section" id="activity" aria-labelledby="activity-title"><div class="panel-heading"><h2 id="activity-title">Activity</h2><a href="/api/v1/status">Status JSON</a></div><ul class="activity" id="events"><li>Waiting for player activity.</li></ul></section>
   </main>
+  <aside id="feedback" class="toast" role="status" aria-live="polite" hidden></aside>
+  <noscript>Enable JavaScript to operate the SyncPlayer console.</noscript>
 </body>
 </html>

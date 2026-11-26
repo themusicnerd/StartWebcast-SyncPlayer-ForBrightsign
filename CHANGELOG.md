@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.2 · 26 November 2026
+
+- Add native video brightness, hue and saturation controls to the console and API.
+- Add opt-in Art-Net unicast or sACN multicast input for colour and transport, with a console source address, DMX patch and media slots.
+
+## 0.2.1 · 26 November 2026
+
+- Wait for fresh peer confirmation before restoring a synchronized library revision after a restart.
+- Verify cached follower assets by SHA-256 before reporting them ready again.
+- Compose the lower webpage and upper HTML5 overlay in a single browser widget. Overlay URLs apply to the current session.
+
+## 0.2.0 · 26 November 2026
+
+- Add the full-width purple StartWebcast SyncPlayer console, with orange branding and packaged StartWebcast artwork.
+- Add streamed MP4 uploads, metadata and hash validation, versioned library, follower distribution, native controls and a LAN API.
+- Add player monitoring, HDMI, volume, Sydney schedule, NTP, role and PTP settings, plus independent Standalone playback.
+- Add the resizable lower source window for MP4, SRT and webpages, with a separate HTML5 overlay.
+
 ## 0.1.6 · 26 November 2026
 
 - Encode clock result flags as strings for the BrightSignOS 9.1.82 Node message bridge.

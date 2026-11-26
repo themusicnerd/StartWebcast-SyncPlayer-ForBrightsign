@@ -192,12 +192,11 @@ def write_card_boot_files(directory, config, player, media_manifest):
     (directory / "syncplayer.json").write_bytes(json_bytes(card_config))
     shutil.copyfile(ROOT / "VERSION", directory / "VERSION")
     app_files = ["autorun.brs", "playback.brs", "syncplayer.json", "VERSION"]
-    if player == config["leader_id"]:
-        (directory / "clock").mkdir(exist_ok=True)
-        for name in ("server.js", "index.html", "clock.js", "clock.css"):
-            target = f"clock/{name}"
-            shutil.copyfile(ROOT / "src" / target, directory / target)
-            app_files.append(target)
+    (directory / "clock").mkdir(exist_ok=True)
+    for name in ("server.js", "index.html", "clock.js", "clock.css", "startwebcast.png", "library.js", "mp4.js", "suite.js", "peers.js", "layer.html", "layer.js", "dmx.js"):
+        target = f"clock/{name}"
+        shutil.copyfile(ROOT / "src" / target, directory / target)
+        app_files.append(target)
     manifest = media_manifest | {
         name: sha256(directory / name) for name in app_files
     }
