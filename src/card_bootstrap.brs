@@ -66,15 +66,27 @@ End Sub
 
 Function UsableUpdateSlot(slot As Dynamic) As Boolean
     If not BootText(slot) Then Return false
-    parts = slot.Split(".")
-    If parts.Count() <> 3 Then Return false
-    For Each part In parts
-        If Len(part) = 0 Or Len(part) > 4 Then Return false
-        If Len(part) > 1 And Left(part, 1) = "0" Then Return false
-        For i = 1 To Len(part)
-            If Instr(1, "0123456789", Mid(part, i, 1)) = 0 Then Return false
-        End For
+    If Len(slot) < 5 Or Len(slot) > 14 Then Return false
+    dots = 0
+    digits = 0
+    startsWithZero = false
+    For i = 1 To Len(slot)
+        char = Mid(slot, i, 1)
+        If char = "." Then
+            If digits = 0 Or dots = 2 Then Return false
+            dots = dots + 1
+            digits = 0
+        Else
+            If Instr(1, "0123456789", char) = 0 Or digits = 4 Then Return false
+            If digits = 0 Then
+                startsWithZero = char = "0"
+            Else If startsWithZero Then
+                Return false
+            End If
+            digits = digits + 1
+        End If
     End For
+    If dots <> 2 Or digits = 0 Then Return false
     root = m.root + "updates/slots/" + slot + "/"
     Return ReadAsciiFile(root + "package.json") <> "" And ReadAsciiFile(root + "VERSION").Trim() = slot
 End Function

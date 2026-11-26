@@ -2,7 +2,7 @@
 
 **Group Membership** on the leader lists the current roster. **Add Player** re-admits a provisioned follower. A new physical player needs its card identity and peer credentials before it appears in the selector.
 
-**Clock & Schedule** saves the Sydney wake and standby times. Clear **Enable Display Schedule** and save to let the leader or standalone player run outside those hours. Followers follow the leader’s display schedule in group mode.
+**Clock & Schedule** saves the Sydney wake and standby times. Playback and overlays continue while the schedule controls HDMI-CEC display power. Clear **Enable Display Schedule** and save to use manual display power. Followers use the leader’s display schedule in group mode.
 
 The top bar shows HDMI-reported TV power. **Power On** and **Standby** send local HDMI-CEC commands to the connected display. **Snapshot** captures a 960 × 540 JPEG of the player’s video and graphics output. A snapshot can show content while a television is off, and HDMI adapters or displays can report power differently. [BrightSign HDMI and Screenshot API](https://docs.brightsign.biz/develop/rovideomode) · [BrightSign HDMI-CEC API](https://docs.brightsign.biz/develop/rocecinterface)
 
@@ -14,7 +14,7 @@ Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.
 
 ## Playback and media
 
-- **Play built-in** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source, and **Loop** controls repeat playback of a local MP4. The Sydney display schedule still applies.
+- **Play Built-In** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source. **Loop** controls repeat playback of a local MP4. The schedule sends display power commands while playback continues.
 - The playhead shows the native playback position once per second. **Pause** becomes **Resume** after a pause. Use **Play locally**, a library preview, or Standalone mode to drag or keyboard-adjust the playhead. Group Pause and Resume require the included followers to report the same clip and playback state. They use BrightSign's shared timestamp. [BrightSign video transport](https://docs.brightsign.biz/develop/rovideoplayer)
 - In **Media library**, upload one MP4 per member. Use names such as `Welcome_A.mp4`, `Welcome_B.mp4` and `Welcome_C.mp4`. Fast-start H.264 or H.265 MP4s with constant video frame timing and optional AAC-LC audio are accepted within the documented limits. The leader streams each upload to a temporary file, validates its metadata, checks native playability for its own file, and stores the SHA-256 digest. Each set retains its earlier complete revisions while you upload a replacement.
 - **Preview on this player** plays the leader's file locally. **Distribute** publishes a complete revision to the configured followers. Followers download their matching file and verify its size, SHA-256 and native playability. **Play group** requires fresh reports from every follower that confirm the same revision, group, PTP domain and HDMI mode. Timing uses native SyncManager. A reconnecting follower can start on a subsequent native transition. The console reports reachability and readiness separately from measured sync quality.
@@ -79,9 +79,12 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `GET /lighting`, `PUT /lighting` | Current lighting settings or `{"protocol":"sacn","source":"192.168.1.50","universe":1,"channel":1}`. Use `"protocol":"off"` to close the listener |
 | `PUT /lighting/slots` | `{"slot":1,"id":"...","revision":"..."}`. Pass an empty `id` to clear a slot |
 | `GET /clock`, `PUT /clock` | Live RTC or `{"utc":"2026-11-26T08:00:00.000Z"}` or `{"sydney":"2026-11-26T19:00"}` |
+| `POST /display-power` | Send `{"power":"on"}` or `{"power":"standby"}` to the local HDMI-CEC interface |
+| `POST /snapshot` | Send `{}` to capture a 960 × 540 JPEG |
+| `GET /updates` | Read the running version, staged version and GitHub source |
 | `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` as the revision for a draft |
 
-`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
+`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 
 From a workstation, use the specific player's public `clock-cert.pem` for HTTPS verification. These examples prompt for the installation password.
 

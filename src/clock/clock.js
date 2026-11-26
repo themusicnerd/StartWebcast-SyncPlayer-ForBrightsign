@@ -158,7 +158,7 @@ function renderMembership(players, native) {
   const available = players.filter((player) => player.manageable && !player.member);
   const previous = select.value;
   select.replaceChildren(new Option(available.length ? 'Select a Player' : 'No Available Players', ''),
-    ...available.map(({ id, address }) => new Option(`Player ${id}${address ? ` · ${address}` : ''}`, id)));
+    ...available.map(({ id, ip }) => new Option(`Player ${id}${ip ? ` · ${ip}` : ''}`, id)));
   if (available.some(({ id }) => id === previous)) select.value = previous;
   select.disabled = form.querySelector('button').disabled = !available.length;
   $('#member-help').textContent = 'Players Appear Here After Provisioning and Removal From the Group.';
@@ -189,7 +189,7 @@ function renderStatus() {
     fill('#window-form', native.rect || {});
     fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
     $('#schedule-help').textContent = native.role === 'follower' ? 'This Follower Uses the Leader’s Schedule During Group Playback.' :
-      'Disabling the Schedule Lets Playback Run at Any Time.';
+      'The Schedule Controls Display Power. Playback Continues in Standby.';
     fill('#ntp-form', native);
     fill('#colour-form', native.colour || {});
     const roleForm = $('#role-form');

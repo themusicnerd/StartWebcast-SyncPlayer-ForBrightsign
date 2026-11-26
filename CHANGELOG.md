@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Keep playback and the HTML5 overlay running while the schedule sends HDMI-CEC display power commands.
+- Share the display schedule with admitted followers through the authenticated leader heartbeat.
+- Check update slot names with BrightScript operations supported on XD236.
+
 ## 0.2.6
 
 - Add offline console and API help with short procedures, HTTPS examples and common request bodies.

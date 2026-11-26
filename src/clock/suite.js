@@ -224,7 +224,7 @@ class Suite {
     try { await this.call('status'); } catch { /* Commands remain available while startup completes. */ }
     try { this.storage = await availableBytes(this.library.root); } catch { this.storage = null; }
     if (this.status?.role === 'follower') void this.follower.pulse(this.status);
-    if (this.status?.role === 'leader' && this.status.waiting && this.status.display) {
+    if (this.status?.role === 'leader' && this.status.waiting) {
       const pending = this.unready(this.status.revision);
       if (!pending.length && this.library.assignment(this.id, this.status.revision)) {
         try { await this.call('arm', { revision: this.status.revision }); } catch { /* Retry on the next status interval. */ }
@@ -443,7 +443,8 @@ class Suite {
       this.peers.set(player, { status: native, ready, problem: String(body.problem || '').slice(0, 160), seen: performance.now(), at: new Date().toISOString() });
       const matches = native.domain === this.status.domain && native.group === this.status.group;
       const admitted = matches && this.activeMembers().includes(player);
-      return json(response, 200, { admitted, assignment: admitted ? this.library.assignment(player) : null });
+      return json(response, 200, { admitted, wake: admitted ? this.status.scheduledwake : undefined,
+        assignment: admitted ? this.library.assignment(player) : null });
     }
     if (match[3] && request.method === 'GET') {
       const assignment = this.library.assignment(player, match[3]);

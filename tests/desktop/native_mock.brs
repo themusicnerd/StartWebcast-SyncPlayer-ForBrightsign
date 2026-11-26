@@ -90,8 +90,11 @@ Sub Main()
     Check(not ScheduleAllows(clock, schedule), "invalid RTC stays out of the on window")
 
     standbyVideo = {StopClear: FakeStopClear, cleared: false}
-    SetDisplayState(standbyVideo, invalid, false)
-    Check(standbyVideo.cleared, "standby stops playback even without a CEC interface")
+    display = {video: standbyVideo, cec: invalid, before: true, screens: true, state: "playing"}
+    ApplyScheduledPower(display, false)
+    Check(not standbyVideo.cleared And not display.screens And display.state = "playing", "scheduled standby leaves playback running")
+    ApplyScheduledPower(display, invalid)
+    Check(display.before = invalid And display.state = "playing", "disabled schedule leaves playback running")
 
     video = {
         PlayFile: FakePlayFile

@@ -100,7 +100,7 @@ class Follower {
       const reply = await replyJson(response);
       const admitted = reply.admitted !== false;
       if (!admitted) this.ready = '';
-      await this.native('membership', { admitted });
+      await this.native('membership', { admitted, wake: typeof reply.wake === 'boolean' ? reply.wake : undefined });
       if (admitted && reply.assignment && reply.assignment.revision !== this.ready && !this.preparing) {
         this.preparing = true;
         void this.prepare(node, base, reply.assignment).then(() => { this.problem = ''; }).catch((error) => {

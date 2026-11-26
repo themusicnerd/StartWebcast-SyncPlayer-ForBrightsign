@@ -255,7 +255,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     config.leader_id = settings.leader
     settings.ntp = network.GetTimeServer()
     settings.interval = network.GetTimeServerIntervalSeconds()
-    panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, warmUntil: 0, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: "Built-in presentation", source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
+    panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: "Built-in presentation", source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
     RestoreSelection(panel)
     panel.waiting = panel.role = "leader" And panel.source = "group" And panel.settings.intent = "auto"
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
@@ -275,9 +275,10 @@ Function SavePanel(panel As Object, settings As Object) As Boolean
 End Function
 
 Function PanelStatus(panel As Object) As Object
-    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: m.version}
+    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: m.version}
     data.colour = panel.colour
     data.scheduleenabled = panel.settings.scheduleenabled
+    If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
     data.cecrequest = panel.cecRequest
     data.tvpower = "unknown"
@@ -411,7 +412,7 @@ Sub StopPanel(panel As Object, blackout As Boolean)
         panel.overlayState = "off"
         panel.state = "blackout"
     Else
-        If panel.screens And m.holding <> invalid Then m.holding.Show()
+        If m.holding <> invalid Then m.holding.Show()
         panel.state = "idle"
         RefreshOverlay(panel)
     End If
@@ -466,12 +467,12 @@ Sub RefreshOverlay(panel As Object)
         End If
         Return
     End If
-    If panel.overlay <> invalid And panel.overlayUrl = panel.settings.overlay And panel.screens And panel.state <> "blackout" Then Return
+    If panel.overlay <> invalid And panel.overlayUrl = panel.settings.overlay And panel.state <> "blackout" Then Return
     If panel.overlay <> invalid Then panel.overlay.Hide()
     panel.overlay = invalid
     panel.overlayPort = invalid
     panel.overlayState = "off"
-    If not panel.screens Or panel.state = "blackout" Or not PanelWebUrl(panel.settings.overlay) Then Return
+    If panel.state = "blackout" Or not PanelWebUrl(panel.settings.overlay) Then Return
     If not panel.graphicsFront Then
         panel.overlayState = "graphics-order-error"
         Return
@@ -521,7 +522,7 @@ Sub PanelHtmlFeedback(panel As Object)
 End Sub
 
 Function StartPanel(panel As Object) As Boolean
-    If not panel.ready Or not panel.screens Then Return false
+    If not panel.ready Then Return false
     If panel.base <> invalid Then panel.base.Hide()
     panel.base = invalid
     panel.htmlPort = invalid
@@ -572,26 +573,13 @@ Sub PanelTick(panel As Object)
         panel.error = "The source did not report playback within 20 seconds."
     End If
     If panel.role = "follower" Or UpTime(0) < panel.readyAt Then Return
-    allowed = true
-    If panel.scheduled And panel.settings.scheduleenabled Then allowed = ScheduleAllows(panel.clock, panel.settings)
-    If panel.before = invalid Or panel.before <> allowed Then
-        panel.before = allowed
-        panel.screens = allowed
-        If allowed Then
-            PanelSignal(panel, panel.baselinePrefix + "-wake-")
-            SetDisplayState(panel.video, panel.cec, true)
-            panel.warmUntil = UpTime(0) + 8
-            If not panel.scheduled Then panel.warmUntil = UpTime(0)
-        Else
-            PanelSignal(panel, panel.baselinePrefix + "-standby-")
-            SetDisplayState(panel.video, panel.cec, false)
-            StopPanel(panel, true)
-            panel.state = "standby"
-            panel.warmUntil = 0
-        End If
+    wake = invalid
+    If panel.scheduled And panel.settings.scheduleenabled = true And panel.clock <> invalid Then
+        If panel.clock.IsValid() Then wake = ScheduleAllows(panel.clock, panel.settings)
     End If
-    If panel.warmUntil > 0 And UpTime(0) >= panel.warmUntil Then
-        panel.warmUntil = 0
+    ApplyScheduledPower(panel, wake)
+    If not panel.autostart Then
+        panel.autostart = true
         If panel.settings.intent = "auto" Then
             If panel.waiting Then
                 panel.state = "waiting for peers"
@@ -621,27 +609,15 @@ Sub PanelFollow(panel As Object, event As Object)
         End If
         Return
     End If
-    If Left(syncId, Len(panel.baselinePrefix) + 9) = panel.baselinePrefix + "-standby-" Then
-        panel.screens = false
-        SetDisplayState(panel.video, panel.cec, false)
-        StopPanel(panel, true)
-        panel.state = "standby"
-        Return
-    End If
+    If Left(syncId, Len(panel.baselinePrefix) + 9) = panel.baselinePrefix + "-standby-" Then Return
     If Left(syncId, 11) = "suite-stop-" Or Left(syncId, 12) = "suite-black-" Then
         StopPanel(panel, Left(syncId, 12) = "suite-black-")
         Return
     End If
-    wake = Left(syncId, Len(panel.baselinePrefix) + 6) = panel.baselinePrefix + "-wake-"
     prefix = panel.baselinePrefix + "-" + panel.nativeLoop + "-"
     baseline = Left(syncId, Len(prefix)) = prefix
     group = Left(syncId, 11) = "suite-play-" And Mid(syncId, 36, 1) = "-"
-    If not wake And not baseline And not group Then Return
-    If not panel.screens Then
-        panel.screens = true
-        SetDisplayState(panel.video, panel.cec, true)
-    End If
-    If wake Then Return
+    If not baseline And not group Then Return
     panel.revision = ""
     panel.asset = ""
     panel.source = "built-in"
@@ -683,7 +659,7 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
     Else If panel.nativeLoop = "seamless" Then
         StopPanel(panel, false)
         LogEvent("SEAMLESS_MEDIA_ENDED", {})
-    Else If panel.role <> "follower" And panel.settings.loop And panel.screens And panel.settings.intent = "auto" Then
+    Else If panel.role <> "follower" And panel.settings.loop And panel.settings.intent = "auto" Then
         StartPanel(panel)
     Else
         StopPanel(panel, false)
@@ -800,11 +776,11 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If panel.role <> "follower" Or not BooleanValue(body.admitted) Then Return "Invalid follower membership."
         If body.admitted Then
             panel.memberUntil = UpTime(0) + 16
+            If panel.ready Then ApplyScheduledPower(panel, body.wake)
         Else
             panel.memberUntil = 0
-            If panel.ready And PanelGroupMedia(panel) And panel.screens Then
-                panel.screens = false
-                SetDisplayState(panel.video, panel.cec, false)
+            panel.before = invalid
+            If panel.ready And PanelGroupMedia(panel) And panel.state <> "outside group" Then
                 StopPanel(panel, true)
                 panel.state = "outside group"
             End If
@@ -873,9 +849,8 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If not SavePanel(panel, panel.settings) Then Return "The loop preference could not be saved."
         Return ""
     End If
-    If not panel.screens Then Return "The display schedule is in standby."
     If action = "arm" Then
-        If not panel.waiting Or panel.source <> "group" Or body.revision <> panel.revision Or panel.warmUntil > 0 Then Return "That revision is not waiting."
+        If not panel.waiting Or panel.source <> "group" Or body.revision <> panel.revision Then Return "That revision is not waiting."
         panel.waiting = false
     Else If action = "source" Then
         panel.waiting = false
@@ -917,7 +892,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         Return "This player cannot perform that command."
     End If
     panel.settings.intent = "auto"
-    panel.warmUntil = 0
+    panel.autostart = true
     If not StartPanel(panel) Then Return panel.error
     If (action = "play" And body.type <> "preview" And body.type <> "built-in-local") Or action = "restart" Then
         If not SavePanel(panel, panel.settings) Then Return "Playback started but the selection could not be saved."
@@ -1020,15 +995,17 @@ Function ScheduleAllows(clock As Dynamic, schedule As Object) As Boolean
     Return current >= MinuteOfDay(schedule.on) And current < MinuteOfDay(schedule.off)
 End Function
 
-Sub SetDisplayState(video As Object, cec As Dynamic, wake As Boolean)
-    If wake Then
-        If m.holding <> invalid Then m.holding.Show()
-    Else
-        video.StopClear()
-        If m.holding <> invalid Then m.holding.Hide()
+Sub ApplyScheduledPower(panel As Object, wake As Dynamic)
+    If not BooleanValue(wake) Then
+        panel.before = invalid
+        Return
     End If
-    If cec = invalid Then Return
-    SendDisplayCec(cec, wake)
+    If BooleanValue(panel.before) Then
+        If panel.before = wake Then Return
+    End If
+    panel.before = wake
+    panel.screens = wake
+    If panel.cec <> invalid Then SendDisplayCec(panel.cec, wake)
 End Sub
 
 Sub SendDisplayCec(cec As Object, wake As Boolean)

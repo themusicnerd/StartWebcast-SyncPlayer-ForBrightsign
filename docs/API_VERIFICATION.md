@@ -1,6 +1,14 @@
 # BrightSign API verification
 
-Reference documentation reviewed on 26 November 2026. Signatures below are document-verified. Physical XD236 execution is pending.
+Reference documentation reviewed on 26 November 2026. Sections below record the API signatures and physical results available for each feature.
+
+## 0.2.5 Playback, Display and Updates
+
+Player A at `3840x2160x50p` reported native positions of 79,000 ms, 80,360 ms and 81,360 ms in successive console samples. Local `Pause()` held the reported position at 1,400 ms. `Seek(45000)` moved to 45,000 ms while paused. `Resume()` advanced the decoder. The test restored the card presentation. Group transport uses `Pause(parameters As roAssociativeArray)` and `Resume(parameters As roAssociativeArray)` with native `SyncIsoTimeStamp`. [BrightSign Video Player](https://docs.brightsign.biz/develop/rovideoplayer)
+
+`roVideoMode.Screenshot(parameters As roAssociativeArray) As Boolean` returned a 960 × 540 JPEG of the live output on Player A. `roVideoMode.GetHdmiOutputStatus() As roAssociativeArray` supplied the `output_powered` field. `roCecInterface.SendRawMessage(packet As roByteArray) As Void` accepted both manual power requests. HDMI continued to report On after the Standby request, so physical Standby remains unconfirmed. The schedule flag saved and read back while the existing wake and standby times were preserved. [BrightSign Video Mode](https://docs.brightsign.biz/develop/rovideomode) · [HDMI-CEC](https://docs.brightsign.biz/develop/rocecinterface)
+
+Player A staged version 0.2.6 from the GitHub branch through the workstation. Player B staged the same signed payload from a local file. Desktop tests covered signature rejection, simulated restart failure, atomic slot activation and rollback. [GitHub Repository Contents API](https://docs.github.com/en/rest/repos/contents#get-repository-content)
 
 ## XD236 and BrightSignOS
 
