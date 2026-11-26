@@ -9,7 +9,7 @@ const { Readable } = require('node:stream');
 const test = require('node:test');
 const { Library, safeName } = require('../../src/clock/library');
 const { announceDomain } = require('../../src/clock/peers');
-const { sanitiseSettings, sourceUrl, Suite } = require('../../src/clock/suite');
+const { decoderTiming, sanitiseSettings, sourceUrl, Suite } = require('../../src/clock/suite');
 
 function fixture(path, colour, frames = 25) {
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=${colour}:s=320x180:r=25`,
@@ -98,7 +98,7 @@ test('persists membership, protects the leader and gates synchronised pause and 
     suite.status = { role: 'leader', playerid: 'A', source: 'built-in', state: 'playing', group: 'wall', domain: 15, output: '3840x2160x50p' };
     suite.receivePlayback(JSON.stringify({ source: 'built-in', state: 'playing', revision: '', synced: true, pausable: true, seekable: false, durationms: 30000 }));
     await assert.rejects(suite.command('pause', {}), /Waiting for updated players/);
-    await assert.rejects(suite.command('seek', { positionMs: 9000 }), /Play a local MP4/);
+    await assert.rejects(suite.command('seek', { positionMs: 9000 }), /Same Playback State/);
     await assert.rejects(suite.setMember('A', false), /provisioned follower/);
     await suite.setMember('B', false);
     assert.deepEqual(suite.activeMembers(), ['A']);
@@ -120,5 +120,26 @@ test('persists membership, protects the leader and gates synchronised pause and 
     await suite.setGroupAudio('A', true);
     assert.deepEqual(actions.at(-1), ['settings', { audioenabled: true }]);
     await assert.rejects(suite.setGroupAudio('C', true), /Active Group/);
+    const shared = { source: 'built-in', state: 'playing', revision: '', cycle: 'cycle-1', synced: true, pausable: true, jumpversion: 1, controlversion: 1, durationms: 30000 };
+    suite.receivePlayback(JSON.stringify(shared));
+    suite.peers.set('B', { status: { ...shared, leader: 'A', group: 'wall', domain: 15, output: '3840x2160x50p' }, seen: performance.now() });
+    assert.equal(suite.playbackStatus().groupSeekable, true);
+    await suite.command('seek', { positionMs: 12000 });
+    assert.deepEqual(actions.at(-1), ['group-seek', { positionms: 12000 }]);
+    await assert.rejects(suite.seekGroup(12000, 'stale-cycle'), /Same Playback State/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('decoder report spread uses sample time while playing and position alone while paused', () => {
+  const playback = { synced: true, cycle: 'shared', state: 'playing' };
+  const now = Date.parse('2026-11-26T10:00:03.000Z');
+  const players = [
+    { member: true, status: { ...playback, sampleutc: '20261126T100001,000', positionms: 1000 } },
+    { member: true, status: { ...playback, sampleutc: '20261126T100002,500', positionms: 2540 } },
+  ];
+  assert.deepEqual(decoderTiming(players, playback, now), { count: 2, expected: 2, state: 'aligned', spreadMs: 40, estimated: true });
+  assert.equal(decoderTiming(players, playback, now + 25000).state, 'collecting');
+  assert.equal(decoderTiming([{ member: true, status: null }, players[1]], playback, now).state, 'waiting');
+  const paused = players.map((player) => ({ ...player, status: { ...player.status, state: 'paused' } }));
+  assert.deepEqual(decoderTiming(paused, { ...playback, state: 'paused' }, now), { count: 2, expected: 2, state: 'different', spreadMs: 1540, estimated: false });
 });

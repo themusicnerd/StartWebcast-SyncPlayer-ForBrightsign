@@ -274,6 +274,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel.cecRequest = ""
     panel.retryAt = 0
     panel.retryDelay = 3
+    panel.mediaCycle = ""
     Return panel
 End Function
 
@@ -328,13 +329,16 @@ Function PanelFileMedia(panel As Object) As Boolean
 End Function
 
 Function PanelPlayback(panel As Object) As Object
-    current = {state: panel.state, source: panel.source, name: panel.name, revision: panel.revision, error: panel.error, pending: panel.change, controlversion: 1, synced: PanelGroupMedia(panel), pausable: false, seekable: false}
+    current = {state: panel.state, source: panel.source, name: panel.name, revision: panel.revision, error: panel.error, pending: panel.change, controlversion: 1, jumpversion: 1, cycle: panel.mediaCycle, synced: PanelGroupMedia(panel), pausable: false, seekable: false}
     If panel.video = invalid Or panel.source = "web" Then Return current
     If panel.state <> "playing" And panel.state <> "paused" And panel.state <> "starting" Then Return current
     current.positionms = panel.video.GetPlaybackPosition()
     current.durationms = panel.video.GetDuration()
     current.pausable = panel.role <> "follower" And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
     current.seekable = current.pausable And not current.synced And current.durationms > 0
+    If current.pausable And m.clock <> invalid Then
+        If m.clock.IsValid() Then current.sampleutc = m.clock.GetUtcDateTime().ToIsoString()
+    End If
     Return current
 End Function
 
@@ -577,9 +581,10 @@ Sub PanelHtmlFeedback(panel As Object)
     End If
 End Sub
 
-Function StartPanel(panel As Object) As Boolean
+Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     If not panel.ready Then Return false
     panel.retryAt = 0
+    panel.mediaCycle = ""
     If panel.base <> invalid Then panel.base.Hide()
     panel.base = invalid
     panel.htmlPort = invalid
@@ -600,8 +605,14 @@ Function StartPanel(panel As Object) As Boolean
         If panel.role = "leader" And (panel.source = "built-in" Or panel.source = "group") Then
             prefix = panel.baselinePrefix + "-" + panel.nativeLoop + "-"
             If panel.source = "group" Then prefix = "suite-play-" + panel.revision + "-"
+            If position >= 0 Then
+                clip = "base"
+                If panel.source = "group" Then clip = panel.revision
+                prefix = "suite-jump-" + clip + "-" + Mid(StrI(position), 2) + "-"
+            End If
             panel.sequence = panel.sequence + 1
-            accepted = StartLeaderCycle(panel.manager, panel.video, path, prefix, panel.sequence)
+            accepted = StartLeaderCycle(panel.manager, panel.video, path, prefix, panel.sequence, position)
+            If accepted Then panel.mediaCycle = prefix + Mid(StrI(panel.sequence), 2)
         Else
             accepted = panel.video.PlayFile({Filename: path})
         End If
@@ -626,6 +637,22 @@ Sub ScheduleVideoRetry(panel As Object)
     panel.retryAt = UpTime(0) + panel.retryDelay
     If panel.retryDelay < 24 Then panel.retryDelay = panel.retryDelay * 2
 End Sub
+
+Function ParseGroupJump(syncId As String) As Dynamic
+    If Left(syncId, 11) <> "suite-jump-" Then Return invalid
+    suffix = Mid(syncId, 12)
+    splitAt = Instr(1, suffix, "-")
+    If splitAt < 2 Then Return invalid
+    clip = Left(suffix, splitAt - 1)
+    If clip <> "base" And not SafeHex(clip, 24) Then Return invalid
+    suffix = Mid(suffix, splitAt + 1)
+    splitAt = Instr(1, suffix, "-")
+    If splitAt < 2 Or splitAt > 9 Then Return invalid
+    raw = Left(suffix, splitAt - 1)
+    position = StrToI(raw)
+    If position < 0 Or Mid(StrI(position), 2) <> raw Then Return invalid
+    Return {clip: clip, position: position}
+End Function
 
 Sub PanelTick(panel As Object)
     CheckUpdateBoot()
@@ -694,6 +721,13 @@ Sub PanelFollow(panel As Object, event As Object)
     prefix = panel.baselinePrefix + "-" + panel.nativeLoop + "-"
     baseline = Left(syncId, Len(prefix)) = prefix
     group = Left(syncId, 11) = "suite-play-" And Mid(syncId, 36, 1) = "-"
+    jump = ParseGroupJump(syncId)
+    position = -1
+    If jump <> invalid Then
+        baseline = jump.clip = "base"
+        group = not baseline
+        position = jump.position
+    End If
     If not baseline And not group Then Return
     panel.revision = ""
     panel.asset = ""
@@ -702,6 +736,7 @@ Sub PanelFollow(panel As Object, event As Object)
     path = panel.baseline
     If group Then
         revision = Mid(syncId, 12, 24)
+        If jump <> invalid Then revision = jump.clip
         If not SafeHex(revision, 24) Then Return
         digest = ReadAsciiFile(panel.root + "library/prepared/" + revision + ".txt")
         path = PanelAsset(panel, digest)
@@ -721,7 +756,12 @@ Sub PanelFollow(panel As Object, event As Object)
     If m.holding <> invalid Then m.holding.Hide()
     panel.state = "starting"
     panel.loadAt = UpTime(0)
-    If not PlayNative(panel.video, path, event) Then panel.state = "error"
+    panel.mediaCycle = ""
+    If PlayNative(panel.video, path, event, position) Then
+        panel.mediaCycle = syncId
+    Else
+        panel.state = "error"
+    End If
     RefreshOverlay(panel)
 End Sub
 
@@ -910,11 +950,19 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         End If
         Return PanelTransport(panel, action, stamp)
     End If
-    If action = "seek" Then
+    If action = "seek" Or action = "group-seek" Then
         playback = PanelPlayback(panel)
-        If not playback.seekable Then Return "Play a local MP4 to use the playhead."
         If not WholeNumber(body.positionms) Then Return "Use a whole-number position in milliseconds."
-        If body.positionms < 0 Or body.positionms >= playback.durationms Then Return "Seek to a position inside the current clip."
+        If playback.durationms = invalid Or body.positionms < 0 Then Return "Seek to a position inside the current clip."
+        If body.positionms >= playback.durationms Then Return "Seek to a position inside the current clip."
+        If action = "group-seek" Then
+            If panel.role <> "leader" Or not playback.synced Or not playback.pausable Or panel.manager = invalid Then Return "Play a Synced MP4 to Move the Group Playhead."
+            panel.video.StopClear()
+            panel.retryDelay = 3
+            If not StartPanel(panel, body.positionms) Then Return panel.error
+            Return ""
+        End If
+        If not playback.seekable Then Return "Play a local MP4 to use the playhead."
         If not panel.video.Seek(body.positionms) Then Return "The native player rejected the seek."
         Return ""
     End If
@@ -1233,22 +1281,30 @@ Function SetNativeLeader(manager As Object, device As Object, leader As Boolean)
     Return current.leader = expected
 End Function
 
-Function StartLeaderCycle(manager As Object, video As Object, path As String, prefix As String, sequence As Integer) As Boolean
+Function StartLeaderCycle(manager As Object, video As Object, path As String, prefix As String, sequence As Integer, position = -1 As Integer) As Boolean
     syncId = prefix + Mid(StrI(sequence), 2)
     event = manager.Synchronize(syncId, 500)
     If event = invalid Then
         LogEvent("SYNC_SCHEDULE_FAILED", {sync_id: syncId})
         Return false
     End If
-    Return PlayNative(video, path, event)
+    Return PlayNative(video, path, event, position)
 End Function
 
-Function PlayNative(video As Object, path As String, event As Object) As Boolean
+Function PlayNative(video As Object, path As String, event As Object, position = -1 As Integer) As Boolean
+    stamp = event.GetIsoTimestamp()
+    If position >= 0 And stamp <> "" Then
+        origin = CreateObject("roDateTime")
+        If origin = invalid Then Return false
+        If not origin.FromIsoString(stamp) Then Return false
+        origin.SubtractMilliseconds(position)
+        stamp = origin.ToIsoString()
+    End If
     params = {
         Filename: path
         SyncDomain: event.GetDomain()
         SyncId: event.GetId()
-        SyncIsoTimestamp: event.GetIsoTimestamp()
+        SyncIsoTimestamp: stamp
     }
     If params.SyncIsoTimestamp = "" Then
         LogEvent("SYNC_TIMESTAMP_MISSING", {sync_id: params.SyncId})

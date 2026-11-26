@@ -112,13 +112,14 @@ function renderPlayback(current) {
   if (scrubbing && current.seekable) return;
   const total = Math.max(0, current.durationms || 0);
   const position = Math.max(0, current.positionms || 0);
-  slider.max = Math.max(1, total - 1);
+  slider.max = Math.max(1, current.groupSeekable ? Math.min(total - 1, 99999999) : total - 1);
   slider.value = Math.min(position, Number(slider.max));
   slider.setAttribute('aria-valuetext', `${duration(position / 1000)} of ${duration(total / 1000)}`);
   $('#position-label').textContent = total > 0 ? `${duration(position / 1000)} / ${duration(total / 1000)}` : (labels[current.source] || '—');
   $('#transport-help').textContent = current.waitingForTransport?.length
     ? `Group Pause and Resume wait for Players ${current.waitingForTransport.join(', ')}. Play locally for immediate control.`
-    : current.synced && total > 0 ? 'Use a local MP4 to drag the playhead.' : '';
+    : current.groupSeekable ? 'Drag to Start Group Playback at the New Position.'
+      : current.synced && total > 0 ? 'The Group Playhead Is Available When Every Included Player Reports the Same Clip.' : '';
 }
 
 async function refreshPlayback() {
@@ -187,7 +188,7 @@ function renderMembership(players, native) {
 }
 
 function renderStatus() {
-  const { native, players, storage, events, ptp, dispatch, lighting } = dashboard;
+  const { native, players, storage, events, ptp, dispatch, lighting, timing } = dashboard;
   $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native Player Starting';
   $('#connection').dataset.state = 'online';
   if (native) {
@@ -234,7 +235,11 @@ function renderStatus() {
   const suffixes = (native?.role === 'standalone' ? [native.playerid] : active.map(({ id }) => id)).map((id) => `Welcome_${id}.mp4`);
   if (suffixes.length) $('#drop > span').textContent = `Use names like ${suffixes.join(', ')}.`;
   const connected = active.filter(({ connection }) => ['local', 'online'].includes(connection)).length;
-  $('#sync-summary').textContent = native?.role === 'standalone' ? 'Standalone' : `${connected}/${active.length} reporting · Sync unmeasured`;
+  const syncSummary = $('#sync-summary');
+  const timingLabels = { local: 'Local Playback', idle: 'Group Idle', waiting: 'Waiting for Players', changing: 'Group Changing Source', collecting: 'Collecting Decoder Reports', aligned: 'Decoder Positions Match', different: 'Decoder Position Difference' };
+  const timingText = timingLabels[timing?.state] || `${connected}/${active.length} Reporting`;
+  syncSummary.textContent = native?.role === 'standalone' ? 'Standalone' : Number.isFinite(timing?.spreadMs) ? `${timingText} · ${timing.spreadMs} ms` : timingText;
+  syncSummary.title = timing?.estimated ? 'Estimated From Native Decoder Positions and Clock Samples. HDMI Frame Alignment Requires Measurement.' : 'Reports From the Native Decoders';
   renderMembership(players, native);
   const list = players.map((player) => {
     const info = player.status;

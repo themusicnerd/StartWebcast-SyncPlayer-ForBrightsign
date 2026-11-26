@@ -87,19 +87,36 @@ class Follower {
     this.preparing = false;
   }
 
+  leaderNode(leaderId) {
+    const leader = this.exchange.leaders?.[leaderId];
+    const address = this.mapping[leaderId];
+    if (!leader || !address || !leader.ca || !digestPattern.test(leader.token)) return null;
+    return { ...leader, address, local: this.host };
+  }
+
+  groupReport() {
+    return performance.now() - this.groupSeen < 16000 ? this.group : null;
+  }
+
+  async seek(status, positionMs, cycle) {
+    const node = this.leaderNode(status.leader);
+    if (!node) throw new Error('The configured leader is unavailable');
+    return replyJson(await connect(node, `/peer/v1/players/${status.playerid}/seek`, 'POST', { positionMs, cycle }));
+  }
+
   async pulse(status) {
     if (this.busy || !status?.leader || performance.now() < this.nextAttempt) return;
-    const leader = this.exchange.leaders?.[status.leader];
-    const address = this.mapping[status.leader];
-    if (!leader || !address || !leader.ca || !digestPattern.test(leader.token)) return;
+    const node = this.leaderNode(status.leader);
+    if (!node) return;
     this.busy = true;
-    const node = { ...leader, address, local: this.host };
     const base = `/peer/v1/players/${status.playerid}`;
     try {
       const response = await connect(node, `${base}/heartbeat`, 'POST', { status, ready: this.ready, problem: this.problem });
       const reply = await replyJson(response);
       const admitted = reply.admitted !== false;
       if (!admitted) this.ready = '';
+      this.group = admitted ? reply.group : null;
+      this.groupSeen = performance.now();
       await this.native('membership', { admitted, wake: typeof reply.wake === 'boolean' ? reply.wake : undefined });
       if (admitted && reply.audio && typeof reply.audio.enabled === 'boolean' && idPattern.test(reply.audio.revision)) {
         await this.native('peer-audio', reply.audio);

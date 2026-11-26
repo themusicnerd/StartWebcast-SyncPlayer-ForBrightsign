@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.12
+
+- Request a group playhead jump from any admitted player. The leader announces a native PTP playback state for the requested position.
+- Show decoder position reports and differences in the Players panel.
+- Reduce the corner radius and top padding of console panels.
+
 ## 0.2.11
 
 - Show only the StartWebcast hexagon in the browser tab icon.

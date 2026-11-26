@@ -13,6 +13,30 @@ const { Lighting } = require('./dmx');
 
 const outputModes = ['3840x2160x50p', '1920x1080x50p'];
 const onlineMs = 16000;
+const maxGroupJumpMs = 99999999;
+
+function decoderTiming(players, playback, now = Date.now()) {
+  const included = players.filter((player) => player.member);
+  const count = included.filter((player) => player.status).length;
+  const summary = { count, expected: included.length };
+  if (!playback?.synced || included.length < 2) return { ...summary, state: 'local' };
+  if (count !== included.length) return { ...summary, state: 'waiting' };
+  if (!['playing', 'paused'].includes(playback.state)) return { ...summary, state: 'idle' };
+  if (!playback.cycle || included.some(({ status }) => status.cycle !== playback.cycle || status.state !== playback.state)) {
+    return { ...summary, state: 'changing' };
+  }
+  const positions = included.map(({ status }) => {
+    if (!Number.isSafeInteger(status.positionms)) return NaN;
+    if (playback.state === 'paused') return status.positionms;
+    const timestamp = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)[.,](\d{3,6})Z?$/.exec(status.sampleutc || '');
+    if (!timestamp) return NaN;
+    const age = now - Date.parse(`${timestamp[1]}-${timestamp[2]}-${timestamp[3]}T${timestamp[4]}:${timestamp[5]}:${timestamp[6]}.${timestamp[7].slice(0, 3)}Z`);
+    return age >= -2000 && age <= onlineMs ? status.positionms + age : NaN;
+  });
+  if (positions.some((position) => !Number.isFinite(position))) return { ...summary, state: 'collecting' };
+  const spreadMs = Math.round(Math.max(...positions) - Math.min(...positions));
+  return { ...summary, state: spreadMs <= 120 ? 'aligned' : 'different', spreadMs, estimated: playback.state === 'playing' };
+}
 
 function networkTimeServer(value) {
   if (value === '') return value;
@@ -216,8 +240,32 @@ class Suite {
   playbackStatus() {
     const playback = this.playback || this.status;
     if (!playback) return null;
-    const waiting = playback.synced && playback.pausable ? this.transportPeers(playback) : [];
-    return { ...playback, pausable: Boolean(playback.pausable && !waiting.length), waitingForTransport: waiting.map(({ id }) => id) };
+    const leader = this.status?.role === 'leader';
+    const waiting = leader && playback.synced && playback.pausable ? this.transportPeers(playback) : [];
+    const groupSeekable = playback.synced && playback.pausable && playback.jumpversion === 1 &&
+      (leader ? this.canGroupSeek(playback, waiting) : this.follower.groupReport()?.seekable === true);
+    return { ...playback, seekable: playback.seekable || Boolean(groupSeekable), groupSeekable: Boolean(groupSeekable),
+      pausable: Boolean(playback.pausable && (!playback.synced || (leader && !waiting.length))), waitingForTransport: waiting.map(({ id }) => id) };
+  }
+
+  canGroupSeek(playback, waiting = this.transportPeers(playback)) {
+    return playback.synced && playback.pausable && playback.jumpversion === 1 && Boolean(playback.cycle) &&
+      !waiting.length && this.activeMembers().filter((id) => id !== this.id).every((id) => {
+        const status = this.peers.get(id)?.status;
+        return status?.jumpversion === 1 && status.cycle === playback.cycle;
+      });
+  }
+
+  async seekGroup(positionMs, cycle) {
+    this.ensureLeader();
+    const playback = this.playback || this.status;
+    if (!this.canGroupSeek(playback) || cycle && cycle !== playback.cycle) {
+      throw new RequestError(409, 'Wait for Every Group Player to Reach the Same Playback State.');
+    }
+    if (!Number.isInteger(positionMs) || positionMs < 0 || positionMs >= playback.durationms || positionMs > maxGroupJumpMs) {
+      throw new RequestError(400, 'Seek to a Position Inside the Current Clip.');
+    }
+    return this.call('group-seek', { positionms: positionMs });
   }
 
   note(event) {
@@ -272,8 +320,16 @@ class Suite {
         manageable: native?.role === 'leader' && digestPattern.test(this.exchange.clients?.[id]) };
     });
     const ptp = this.observe();
+    const localPlayback = this.playback || native;
+    const reports = players.map((player) => {
+      if (player.id === this.id) return { ...player, status: localPlayback };
+      const status = player.status;
+      return status?.leader === this.id && status.group === native?.group && status.domain === native?.domain ? player : { ...player, status: null };
+    });
+    const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
+      decoderTiming(reports, localPlayback);
     return { native, players, storage: this.storage, problem: this.problem, ptp,
-      dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', outputModes, lighting: this.lighting.snapshot() };
+      dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot() };
   }
 
   ensureLeader() {
@@ -415,9 +471,14 @@ class Suite {
     if (action === 'pause' || action === 'resume' || action === 'seek') {
       const current = this.playbackStatus();
       if (action === 'seek') {
+        if (current?.synced && this.status?.role === 'leader') return this.seekGroup(body.positionMs);
         if (!current?.seekable) throw new RequestError(409, 'Play a local MP4 to use the playhead.');
         if (!Number.isInteger(body.positionMs) || body.positionMs < 0 || body.positionMs >= current.durationms) {
           throw new RequestError(400, 'Seek to a position inside the current clip.');
+        }
+        if (current.synced) {
+          try { return await this.follower.seek(this.status, body.positionMs, current.cycle); }
+          catch { throw new RequestError(409, 'The Leader Could Not Move the Group Playhead. Try Again When the Group Is Playing.'); }
         }
         return this.call(action, { positionms: body.positionMs });
       }
@@ -457,7 +518,7 @@ class Suite {
   }
 
   async peer(request, response, url, json) {
-    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
+    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|seek|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
     if (!match || this.status?.role !== 'leader') throw new RequestError(404, 'Peer action unavailable.');
     const player = match[1];
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization || '');
@@ -475,7 +536,20 @@ class Suite {
       const audio = admitted && this.library.state.audioCommands?.[player];
       return json(response, 200, { admitted, wake: admitted ? this.status.scheduledwake : undefined,
         audio: audio && audio.revision !== native.audiorevision ? audio : undefined,
+        group: admitted ? { timing: this.snapshot().timing, seekable: this.playbackStatus()?.groupSeekable === true } : undefined,
         assignment: admitted ? this.library.assignment(player) : null });
+    }
+    if (match[2] === 'seek' && request.method === 'POST') {
+      const peer = this.peers.get(player);
+      if (!this.activeMembers().includes(player) || !peer || performance.now() - peer.seen >= onlineMs) {
+        throw new RequestError(409, 'Only an Online Group Follower Can Move the Playhead.');
+      }
+      return json(response, 200, await this.update(request, async () => {
+        const { positionMs, cycle } = await readJson(request);
+        if (typeof cycle !== 'string' || cycle !== peer.status.cycle) throw new RequestError(409, 'Player Timing Changed. Try Again.');
+        await this.seekGroup(positionMs, cycle);
+        return { ok: true };
+      }));
     }
     if (match[3] && request.method === 'GET') {
       const assignment = this.library.assignment(player, match[3]);
@@ -495,4 +569,4 @@ class Suite {
   }
 }
 
-module.exports = { Suite, colourValues, networkTimeServer, readJson, rectangle, sanitiseSettings, sourceUrl };
+module.exports = { Suite, colourValues, decoderTiming, networkTimeServer, readJson, rectangle, sanitiseSettings, sourceUrl };

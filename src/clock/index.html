@@ -26,7 +26,7 @@
           <p class="muted" id="transport-help"></p>
           <p class="feedback" id="playback-error"></p>
         </article>
-        <article class="panel"><div class="panel-heading"><h2>Players</h2><span class="status-pill" id="sync-summary">Sync unmeasured</span></div><div class="player-grid" id="players"></div><p id="storage" class="muted">Reading SD card…</p></article>
+        <article class="panel"><div class="panel-heading"><h2>Players</h2><span class="status-pill" id="sync-summary">Waiting for Players</span></div><div class="player-grid" id="players"></div><p id="storage" class="muted">Reading SD card…</p></article>
         <article class="panel"><div class="panel-heading"><h2>Group Membership</h2></div><div id="group-members"><p class="muted">Reading the configured group…</p></div>
           <form id="member-form" class="stack" hidden><div class="form-row"><label class="grow">Available Player<select name="player" required></select></label><button type="submit">Add Player</button></div><p id="member-help" class="muted"></p></form>
         </article>
@@ -119,6 +119,7 @@
             <li>Select <strong>Resume</strong> to continue.</li>
             <li>Select <strong>Play Locally</strong> to use the playhead on this player.</li>
             <li>Drag the playhead to a new position in the local MP4.</li>
+            <li>During group playback, drag the playhead on any included player to start the group at the new position.</li>
           </ol><p>The playhead reads the native player once per second. Group Pause and Resume require all included players online.</p></details>
           <details><summary>Set the Group</summary><ol>
             <li>Open <a href="#settings">Settings</a>.</li>

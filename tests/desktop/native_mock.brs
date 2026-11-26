@@ -123,6 +123,10 @@ Sub Main()
     recovery.settings.intent = "auto"
     recovery.role = "follower"
     Check(not CanRetryVideo(recovery), "follower does not create a private restart")
+    jump = ParseGroupJump("suite-jump-base-45000-7")
+    Check(jump.clip = "base" And jump.position = 45000, "group jump identifies the clip and offset")
+    Check(ParseGroupJump("suite-jump-base-0045000-7") = invalid, "reject ambiguous group jump positions")
+    Check(ParseGroupJump("suite-jump-other-45000-7") = invalid, "reject unknown group jump clips")
 
     video = {
         PlayFile: FakePlayFile
