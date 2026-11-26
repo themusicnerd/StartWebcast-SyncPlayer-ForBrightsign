@@ -11,8 +11,10 @@ function page(name) {
   return value.href;
 }
 
-for (const [field, key] of [['left', 'x'], ['top', 'y'], ['width', 'width'], ['height', 'height']]) {
-  lower.style[field] = `${Number(bounds[key])}%`;
-}
-lower.src = page('base');
+if (params.has('base')) {
+  for (const [field, key] of [['left', 'x'], ['top', 'y'], ['width', 'width'], ['height', 'height']]) {
+    lower.style[field] = `${Number(bounds[key])}%`;
+  }
+  lower.src = page('base');
+} else lower.remove();
 upper.src = page('overlay');

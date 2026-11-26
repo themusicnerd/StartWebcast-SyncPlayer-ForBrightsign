@@ -256,7 +256,7 @@ Function SavePanel(panel As Object, settings As Object) As Boolean
 End Function
 
 Function PanelStatus(panel As Object) As Object
-    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: "0.2.2"}
+    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: "0.2.3"}
     data.colour = panel.colour
     If Type(panel.settings.selection) = "roAssociativeArray" Then data.savedasset = panel.settings.selection.asset
     If panel.clock <> invalid Then
@@ -351,10 +351,17 @@ Function PanelWebUrl(value As Dynamic) As Boolean
     Return Len(value) <= 1024 And (Left(value, 7) = "http://" Or Left(value, 8) = "https://")
 End Function
 
-Function HtmlLayer(url As String, bounds As Object, port As Object, transparent As Boolean) As Dynamic
+Function HtmlLayer(url As String, bounds As Object, port As Object) As Dynamic
     options = {url: url, port: port, nodejs_enabled: false, brightsign_js_objects_enabled: false, security_params: {websecurity: true, insecure_https_enabled: false}, pcm_audio_outputs: []}
-    If transparent Then options.user_stylesheet = "data:text/css,html%2Cbody%7Bbackground-color%3Atransparent%20%21important%3B%7D"
     Return CreateObject("roHtmlWidget", bounds, options)
+End Function
+
+Function LayerDocument(panel As Object, base As String) As String
+    encode = CreateObject("roUrlTransfer")
+    If encode = invalid Then Return ""
+    url = "file:/" + panel.root + "clock/layer.html?overlay=" + encode.Escape(panel.settings.overlay)
+    If base <> "" Then url = url + "&base=" + encode.Escape(base) + "&rect=" + encode.Escape(FormatJson(panel.settings.rect))
+    Return url
 End Function
 
 Function StartWebLayer(panel As Object) As Boolean
@@ -368,15 +375,12 @@ Function StartWebLayer(panel As Object) As Boolean
     url = panel.url
     bounds = PanelBounds(panel, panel.settings.rect)
     If PanelWebUrl(panel.settings.overlay) Then
-        encode = CreateObject("roUrlTransfer")
-        If encode = invalid Then Return false
-        url = "file:/" + panel.root + "clock/layer.html?base=" + encode.Escape(panel.url) + "&overlay=" + encode.Escape(panel.settings.overlay)
-        rect = panel.settings.rect
-        url = url + "&rect=" + encode.Escape(FormatJson(rect))
+        url = LayerDocument(panel, panel.url)
+        If url = "" Then Return false
         bounds = PanelBounds(panel, {x: 0, y: 0, width: 100, height: 100})
         panel.overlayState = "loading"
     End If
-    panel.base = HtmlLayer(url, bounds, panel.htmlPort, false)
+    panel.base = HtmlLayer(url, bounds, panel.htmlPort)
     If panel.base = invalid Then Return false
     Return panel.base.Show()
 End Function
@@ -405,7 +409,8 @@ Sub RefreshOverlay(panel As Object)
     panel.overlayUrl = panel.settings.overlay
     panel.overlayPort = CreateObject("roMessagePort")
     screen = PanelBounds(panel, {x: 0, y: 0, width: 100, height: 100})
-    panel.overlay = HtmlLayer(panel.settings.overlay, screen, panel.overlayPort, true)
+    url = LayerDocument(panel, "")
+    If url <> "" Then panel.overlay = HtmlLayer(url, screen, panel.overlayPort)
     If panel.overlay = invalid Then
         panel.overlayState = "error"
     Else If panel.overlay.Show() Then
@@ -697,7 +702,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
             If not WholeNumber(body[key]) Then Return "Video colour values must be whole numbers."
             If body[key] < -1000 Or body[key] > 1000 Then Return "Video colour value out of range."
         End For
-        values = {Brightness: body.brightness, Hue: body.hue, Saturation: body.saturation}
+        values = {Brightness: body.brightness, Hue: body.hue, Saturation: body.saturation, Contrast: 0}
         If not panel.video.AdjustVideoColor(values) Then Return "The player rejected the colour adjustment."
         panel.colour = values
         Return ""
@@ -1035,7 +1040,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.2.2"
+    fields.version = "0.2.3"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)

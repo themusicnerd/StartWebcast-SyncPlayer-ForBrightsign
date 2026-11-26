@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3 · 26 November 2026
+
+- Use the bundled transparent HTML compositor for the overlay above native MP4 and SRT sources as well as webpages.
+
 ## 0.2.2 · 26 November 2026
 
 - Add native video brightness, hue and saturation controls to the console and API.

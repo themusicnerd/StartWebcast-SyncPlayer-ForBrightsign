@@ -18,7 +18,7 @@ For SRT, use `srt://encoder:port?mode=caller` from a compatible encoder in liste
 
 ## Settings
 
-- **HDMI & audio** changes the selected player between 4K50 and 1080p50 and sets native video volume. The mode change restarts the application. Synchronized players use matching output modes. Follower MP4 audio stays muted. Use the page or source controls for webpage audio.
+- **HDMI & audio** changes the selected player between 4K50 and 1080p50 and sets native MP4 and SRT volume. The mode change restarts the application. Synchronized players use matching output modes. Follower MP4 audio stays muted.
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
 - **Clock & schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A sizable clock change can briefly restart playback. **Network time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
@@ -35,6 +35,8 @@ Select **sACN multicast** (UDP 5568) or **Art-Net unicast** (UDP 6454) under **L
 | 4 | 0–31 idle, 32–63 play the slot, 64–95 stop, 96–127 restart, 128–159 blackout |
 
 Return transport to idle before the first cue and between repeated cues. A held cue does one operation. After 2.5 seconds without a valid packet, colour returns to neutral and transport waits for idle again. A group slot uses the same media readiness checks as the browser. The colour controls affect the native video image on the local player. [Art-Net specification](https://art-net.org.uk/structure/streaming-packets/artdmx-packet-definition/) · [ANSI E1.31](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf)
+
+Player A verified both transports on BrightSignOS 9.1.82. The installed firmware rejected native picture adjustment at 4K50. The API returns the rejection and transport remains available. See the [hardware evidence](API_VERIFICATION.md#management-suite--brightsignos-9182).
 
 ## API v1
 
@@ -61,6 +63,13 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` as the revision for a draft |
 
 `PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
+
+From a workstation, use the specific player's public `clock-cert.pem` for HTTPS verification. These examples prompt for the installation password.
+
+```powershell
+curl.exe --cacert clock-cert.pem --user SyncPlayer https://192.168.1.11:8080/api/v1/status
+curl.exe --cacert clock-cert.pem --user SyncPlayer -X POST -H 'X-SyncPlayer-Request: control' -H 'Content-Type: application/json' --data '{}' https://192.168.1.11:8080/api/v1/restart
+```
 
 ## SD updates and rollback
 

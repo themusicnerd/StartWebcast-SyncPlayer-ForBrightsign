@@ -124,6 +124,12 @@ Sub Main()
     video.accept = false
     Check(not PlayNative(video, clip, event), "native player rejection propagated")
     Check(video.calls = 3, "decoder mock exercised")
+
+    m.holding = invalid
+    localVideo = {PlayFile: FakePlayFile, accept: true, calls: 0}
+    localPanel = {ready: true, screens: true, base: invalid, settings: {overlay: ""}, role: "standalone", source: "built-in", asset: "", baseline: clip, manager: invalid, video: localVideo}
+    Check(StartPanel(localPanel), "standalone starts with no SyncManager")
+    Check(localVideo.lastInput.Filename = clip And localVideo.lastInput.SyncIsoTimestamp = invalid, "standalone sends only the local file to the decoder")
     If m.failures = 0 Then Print "NATIVE_MOCK_TESTS_PASSED"
 End Sub
 
@@ -133,6 +139,10 @@ Sub Check(condition As Boolean, description As String)
         Print "FAIL: "; description
     End If
 End Sub
+
+Function UpTime(units As Integer) As Float
+    Return 60.0
+End Function
 
 Function FakeSynchronize(id As String, delay As Integer) As Dynamic
     m.id = id

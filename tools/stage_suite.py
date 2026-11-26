@@ -39,6 +39,7 @@ def stage(root, output, openssl):
     package = {"CONTENT-CARDS.md": ROOT / "docs/CONTENT-CARDS.md"}
     if (ROOT / "docs/SUITE.md").is_file():
         package["SUITE.md"] = ROOT / "docs/SUITE.md"
+        package["API_VERIFICATION.md"] = ROOT / "docs/API_VERIFICATION.md"
     for card in players:
         config_bytes = (card / "syncplayer.json").read_bytes()
         config = json.loads(config_bytes)
