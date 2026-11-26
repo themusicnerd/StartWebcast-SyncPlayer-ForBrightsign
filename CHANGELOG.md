@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.17
+
+- Show SyncPlayer beside the StartWebcast logo and right-align the player name on the IDENT screen.
+- Clear temporary leader connection messages when the follower reconnects.
+
 ## 0.2.16
 
 - Decode the BrightSign clock format on the IDENT screen and fit all diagnostics in portrait mode.

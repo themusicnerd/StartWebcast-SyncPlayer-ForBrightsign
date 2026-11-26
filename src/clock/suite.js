@@ -462,7 +462,8 @@ class Suite {
     const reportedPlayers = new Map((leaderReport?.players || []).map((player) => [player.id, player]));
     const players = this.members.map((id) => {
       if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true,
-        thumbnail: reportedPlayers.get(id)?.thumbnail || this.preview(id)?.epoch || '' };
+        thumbnail: reportedPlayers.get(id)?.thumbnail || this.preview(id)?.epoch || '',
+        problem: native?.role === 'follower' ? this.follower.connectionProblem : '' };
       const mirrored = reportedPlayers.get(id);
       if (mirrored) return { ...mirrored, ip: this.addresses[id], manageable: false };
       const peer = this.peers.get(id);

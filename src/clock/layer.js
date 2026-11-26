@@ -30,7 +30,7 @@ function showStartup(data) {
   const lighting = data.lighting || {};
   const protocols = { artnet: 'Art-Net Unicast', sacn: 'sACN Multicast' };
   const networkTime = !data.ntp ? 'Disabled' : data.ntperror ? 'Last Attempt Failed' : Number(data.ntpsuccess) > 0 ? 'Network Time Received' : 'Waiting for Network Time';
-  document.querySelector('#player-name').textContent = `Player ${data.player} · SyncPlayer`;
+  document.querySelector('#player-name').textContent = `Player ${data.player}`;
   document.querySelector('#repository').textContent = `https://github.com/${data.repository}`;
   const fields = [
     ['IP Address', data.ip], ['Ethernet MAC', data.mac], ['Serial Number', data.serial],

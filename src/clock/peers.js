@@ -83,6 +83,7 @@ class Follower {
     this.capture = capture;
     this.ready = '';
     this.problem = '';
+    this.connectionProblem = '';
     this.nextAttempt = 0;
     this.busy = false;
     this.preparing = false;
@@ -137,6 +138,7 @@ class Follower {
       this.group = admitted ? reply.group : null;
       this.groupSeen = performance.now();
       await this.native('membership', { admitted, wake: typeof reply.wake === 'boolean' ? reply.wake : undefined });
+      this.connectionProblem = '';
       if (admitted && reply.audio && typeof reply.audio.enabled === 'boolean' && idPattern.test(reply.audio.revision)) {
         await this.native('peer-audio', reply.audio);
       }
@@ -154,7 +156,7 @@ class Follower {
           .finally(() => { this.capturing = false; });
       }
     } catch (error) {
-      this.problem = error.code === 'ECONNREFUSED' ? `Leader ${node.address}:8080 Is Starting or Unavailable. Retrying.` : error.message.slice(0, 160);
+      this.connectionProblem = error.code === 'ECONNREFUSED' ? `Leader ${node.address}:8080 Is Starting or Unavailable. Retrying.` : error.message.slice(0, 160);
       this.nextAttempt = performance.now() + 8000;
     } finally { this.busy = false; }
   }
