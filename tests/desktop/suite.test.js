@@ -19,6 +19,8 @@ function fixture(path, colour, frames = 25) {
 test('validates file names, mode, window, clock server and source settings', () => {
   assert.deepEqual(sanitiseSettings({ genlock: true }, ['A', 'B'], { role: 'leader', leader: 'A' }, 'A'), { genlock: true });
   assert.throws(() => sanitiseSettings({ genlock: 'true' }, ['A'], {}, 'A'), /HDMI Genlock/);
+  assert.deepEqual(sanitiseSettings({ identonboot: false }, ['A'], {}, 'A'), { identonboot: false });
+  assert.throws(() => sanitiseSettings({ identonboot: 'false' }, ['A'], {}, 'A'), /IDENT on Boot/);
   assert.equal(safeName('Welcome_Christmas_2026_b.MP4', ['A', 'B']).target, 'B');
   assert.equal(safeName('Welcome-C.MP4', ['A', 'B', 'C']).id, safeName('Welcome.A.mp4', ['A', 'B', 'C']).id);
   assert.throws(() => safeName('../Welcome_A.mp4', ['A']), /Name the file/);

@@ -113,3 +113,7 @@ All three XD236 consoles reported the A, B and C media files for Nature Is Not a
 Player C edited a saved RTSP source’s name and started it with the existing URL. After the test transmitter stopped, the player retried and switched to the selected SD presentation. Its startup selection still reported the RTSP source. Once the transmitter was available, Retry Last Stream returned it to RTSP. The test source was removed and the prior recovery setting was restored.
 
 Player C decoded a generated SRT feed, accepted Stop and retained the SRT startup selection. After a reboot, the native decoder reopened the same SRT feed without a Play request. Player C returned to the ABC presentation after the test.
+
+### 0.2.21 HDMI Genlock
+
+The desktop native mock covers Off, accepted and rejected `roVideoMode.SetSyncDomain(domain As String) As Boolean` requests and the standalone guard. All three XD236 units on BrightSignOS 9.1.173 reported Off after upgrading. The lock state has not been measured on hardware. [BrightSign video mode API](https://docs.brightsign.biz/develop/rovideomode#set-sync-domain)

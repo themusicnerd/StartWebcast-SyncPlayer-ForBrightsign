@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.22
+
+- Add a per-player setting to show or hide IDENT on boot. The default is On.
+
 ## 0.2.21
 
 - Add an opt-in HDMI genlock request under Playback Mode & PTP. Report rejection or unverified lock and continue PTP playback after a rejection.

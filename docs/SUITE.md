@@ -57,6 +57,7 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 
 - **HDMI & Audio** changes the selected player between 4K50 and 1080p50 and sets native MP4 and stream volume. Grouped players use matching output modes. Select **CEC Remote Playback** to accept Play, Pause and Stop from a compatible TV. An in-group follower passes the commands to the leader.
 - **Ethernet** shows the active address and MAC. Use **Static** to enter the IPv4 address, mask, gateway and DNS servers. Use **DHCP** to take the settings from your network. Reserve the configured IP for a grouped player. A standalone player can use a different address. Read the new address on its identification screen after restart.
+- Under **Settings → Startup**, clear **Show IDENT on Boot** to start with a black screen until playback begins. This skips the automatic IDENT screen and the holding image. The setting defaults to on. Changes apply at the next boot. Use the top-bar **IDENT** button at any time.
 - **Device Status** shows local CPU, RAM, SD capacity, temperatures and screen identification from HDMI EDID where available. **IDENT** shows player information, address, settings, clock and lighting configuration over the current output. Select **IDENT** again to hide it.
 - **Test Pattern** shows offline colour bars and the player name. Select **Test Pattern** again to hide it. Playback continues underneath.
 - **Updates** shows the installed BrightSignOS version. Open the BrightSign updater, sign in to the Diagnostic Web Server, then select **Advanced** and **BrightSignOS Update**. [BrightSign DWS](https://docs.brightsign.biz/manage/diagnostic-web-server-dws)
@@ -111,6 +112,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `GET /players/{id}/preview?v={epoch}` | Read the corresponding 160 × 90 JPEG. |
 | `GET /network`, `PUT /network` | Read the active Ethernet profile. Apply `{"mode":"static","address":"192.168.1.11","netmask":"255.255.255.0","gateway":"","dns":[],"confirm":true}` or use `mode: dhcp`. Group DHCP also requires `"reserved":true`. |
 | `GET /settings`, `PUT /settings` | Current state or a partial settings update |
+| `PUT /settings` with `{"identonboot":false}` | Keep the screen black at the next boot until playback begins. Use `true` to enable it. |
 | `PUT /settings` with `{"genlock":true}` | Request HDMI genlock on this group player and restart. Read `native.genlockstate` in `/status` to see the request result. |
 | `GET /ptp` | Multicast listener state and recently heard domains |
 | `PUT /colour` | `{"brightness":0,"hue":0,"saturation":0}`. Each value is an integer −1000 to 1000 |

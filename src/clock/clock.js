@@ -313,6 +313,7 @@ function renderStatus() {
     $('#schedule-help').textContent = native.role === 'follower' ? 'This Follower Uses the Leader’s Schedule During Group Playback.' :
       'The Schedule Controls Display Power. Playback Continues in Standby.';
     fill('#ntp-form', native);
+    fill('#startup-form', { identonboot: native.identonboot !== false });
     fill('#colour-form', native.colour || {});
     const roleForm = $('#role-form');
     if (!roleForm.dataset.dirty) {
@@ -826,6 +827,7 @@ form('#role-form', (fields, element) => {
 });
 form('#schedule-form', (fields, element) => saveSettings(element, { on: fields.on.value, off: fields.off.value, scheduleenabled: fields.enabled.checked }));
 form('#member-form', (fields) => { if (fields.player.value) void changeMembership(fields.player.value, true); });
+form('#startup-form', (fields, element) => saveSettings(element, { identonboot: fields.identonboot.checked }));
 form('#ntp-form', (fields, element) => saveSettings(element, { ntp: fields.ntp.value.trim(), interval: Number(fields.interval.value) }));
 form('#colour-form', async (fields, element) => {
   const colour = Object.fromEntries(['brightness', 'hue', 'saturation'].map((key) => [key, Number(fields[key].value)]));

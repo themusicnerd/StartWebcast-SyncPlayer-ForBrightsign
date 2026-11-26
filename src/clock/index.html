@@ -125,6 +125,7 @@
         <article class="panel"><form id="role-form" class="stack"><h3>Playback Mode &amp; PTP</h3><div class="form-row"><label class="grow">Mode<select name="role"><option value="leader">Leader</option><option value="follower">Follower</option><option value="standalone">Standalone</option></select></label><label class="grow">Leader Player<select name="leader"></select></label></div><div class="form-row"><label class="grow">Sync Group Name<input name="group" type="text" maxlength="48" pattern="[a-z0-9\-]+" required></label><label>PTP Domain<input name="domain" type="number" min="0" max="127" required></label></div><p id="ptp-use" class="muted">Reading PTP announcements…</p><label class="check"><input type="checkbox" name="genlock" aria-describedby="genlock-status"> Request HDMI Genlock</label><p id="genlock-status" class="muted" role="status">Reading HDMI Genlock Status…</p><button type="submit">Save Mode &amp; PTP</button></form></article>
         <article class="panel"><h3>Clock &amp; Schedule</h3><p><time id="current">Reading Sydney time…</time></p><div class="actions"><button type="button" class="secondary" id="computer">Use This Computer’s Time</button></div><form id="manual" class="stack"><div class="form-row"><label class="grow">Sydney Date and Time<input id="sydney" type="datetime-local" required></label><button id="save" type="submit" class="secondary">Set Time</button></div></form><form id="schedule-form" class="stack"><label class="check"><input type="checkbox" name="enabled" checked> Enable Display Schedule</label><div class="form-row"><label>Daily Wake<input name="on" type="time" required></label><label>Daily Standby<input name="off" type="time" required></label><button type="submit" class="secondary">Save Schedule</button></div><p class="muted" id="schedule-help"></p></form></article>
         <article class="panel"><form id="ntp-form" class="stack"><h3>Network Time</h3><label>NTP Server<input type="text" name="ntp" spellcheck="false" placeholder="0.au.pool.ntp.org"></label><label>Update Interval (Seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
+        <article class="panel"><form id="startup-form" class="stack"><h3>Startup</h3><label class="check"><input type="checkbox" name="identonboot" checked aria-describedby="startup-ident-help"> Show IDENT on Boot</label><p id="startup-ident-help" class="muted">Clear this option for a black screen until playback starts.</p><button type="submit">Save Startup</button></form></article>
       </div>
     </section>
 
@@ -182,6 +183,7 @@
           <details><summary>Identify a Player and Check its Status</summary><ol>
             <li>Select <strong>IDENT</strong> to show player and configuration details on its screen for 10 seconds.</li>
             <li>Select <strong>IDENT</strong> again to close it.</li>
+            <li>To change the startup display, open <strong>Settings</strong>. In <strong>Startup</strong>, set <strong>Show IDENT on Boot</strong> and select <strong>Save Startup</strong>.</li>
             <li>Select <strong>Test Pattern</strong> to show local colour bars. Select it again to return to the current output.</li>
             <li>Read <strong>Device Status</strong> for local metrics and the HDMI screen ID.</li>
             <li>Select <strong>Edit Layout</strong> to arrange the player previews for the group.</li>
@@ -257,6 +259,7 @@
               <dt>PUT <code>/group/audio/B</code></dt><dd>Send <code>{"enabled":true}</code> to enable HDMI audio on Player B.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
+              <dt>PUT <code>/settings</code></dt><dd>Send <code>{"identonboot":false}</code> for a black screen until playback starts at the next boot.</dd>
               <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds, or send <code>{"mode":"test-pattern"}</code> to show local colour bars. Send <code>{"seconds":0}</code> to close either screen.</dd>
               <dt>GET <code>/network</code></dt><dd>Read the Ethernet mode, address, mask, gateway and DNS settings.</dd>
               <dt>GET <code>/sources</code></dt><dd>List saved SRT feeds, RTSP feeds and webpages. Send a saved ID to <code>POST /source</code> to start it.</dd>
