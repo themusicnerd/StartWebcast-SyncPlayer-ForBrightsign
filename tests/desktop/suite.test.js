@@ -111,6 +111,37 @@ test('streams drafts, rejects mismatched members and durably replaces only compl
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('keeps PCM MOV cuts and their replica file extensions', async (t) => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-pcm-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const library = new Library(join(root, 'library'), ['A', 'B'], async () => true);
+  await library.init();
+
+  for (const [player, colour] of [['A', 'red'], ['B', 'blue']]) {
+    const name = `Welcome_PCM_${player}.mov`;
+    const source = join(root, name);
+    execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', `color=${colour}:s=320x180:r=25`,
+      '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', '1', '-c:v', 'libx264',
+      '-c:a', 'pcm_s16le', '-movflags', '+faststart', source]);
+    const data = await fs.readFile(source);
+    if (player === 'A') {
+      await assert.rejects(library.upload('Welcome_PCM_A.mp4', Readable.from([data]), data.length, false, 'A'),
+        /container does not match/);
+    }
+    await library.upload(name, Readable.from([data]), data.length, false, 'A');
+  }
+
+  const [set] = library.list();
+  assert.equal(set.name, 'Welcome_PCM');
+  assert.equal(set.revisions[0].audio.codec, 'PCM');
+  await library.distribute(set.id, set.revisions[0].revision);
+  const assignment = library.assignment('B');
+  assert.equal(assignment.extension, 'mov');
+  assert.deepEqual(assignment.assets.map(({ extension }) => extension), ['mov', 'mov']);
+  assert.deepEqual((await fs.readdir(join(root, 'library/assets'))).sort(),
+    assignment.assets.map(({ digest }) => `${digest}.mov`).sort());
+});
+
 test('blocks an unprepared native group and selects local MP4 in standalone', async () => {
   const config = { card_player_id: 'A', players: { '127.0.0.1': 'A', '127.0.0.2': 'B' } };
   const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-suite-'));

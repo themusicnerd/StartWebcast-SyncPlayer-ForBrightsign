@@ -254,7 +254,8 @@ if (require.main === module) {
     server = makeServer({ host, port, tls, credentials, requestClock, suite, updates });
     server.on('error', () => console.error('StartWebcast SyncPlayer server could not start.'));
     Promise.all([suite.init(), updates.init()]).then(() => {
-      server.listen(port, host, () => console.log(`StartWebcast SyncPlayer listening on ${host}:${port}`));
+      server.requestTimeout = 60 * 60 * 1000;
+  server.listen(port, host, () => console.log(`StartWebcast SyncPlayer listening on ${host}:${port}`));
       void suite.refresh();
       void suite.readMetrics();
       setInterval(() => void suite.refresh(), 5000).unref();

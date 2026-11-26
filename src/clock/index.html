@@ -97,7 +97,7 @@
       <section class="panel section" id="library" aria-labelledby="library-title">
         <div class="panel-heading"><h2 id="library-title">Lower Layer Media Library</h2><span id="library-count" class="muted"></span></div>
         <form id="upload">
-          <label class="drop" id="drop" for="media-files"><strong>Drop MP4 Files or Choose Files</strong><span>Use names like Welcome_A.mp4, Welcome_B.mp4 and Welcome_C.mp4.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,.mp4"></label>
+          <label class="drop" id="drop" for="media-files"><strong>Drop MP4 or MOV Files</strong><span>Use names like Welcome_A.mp4 or Welcome_PCM_A.mov.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,video/quicktime,.mp4,.mov"></label>
           <ul id="upload-plan" aria-label="Detected File Assignments" class="upload-plan" hidden></ul>
           <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace Draft Files</label></div>
           <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
@@ -237,7 +237,7 @@
           </ol><p>Prepare the follower’s card and peer credentials before you add it.</p></details>
           <details><summary>Upload and Distribute a Clip</summary><ol>
             <li>Open <a href="#library">Lower Layer Media Library</a> on the leader.</li>
-            <li>Use one MP4 for each group member. For example, use <code>Welcome_A.mp4</code>.</li>
+            <li>Use one MP4 or PCM MOV for each group member. For example, use <code>Welcome_A.mp4</code>.</li>
             <li>Select the MP4 files.</li><li>Select <strong>Upload</strong>.</li>
             <li>Select <strong>Distribute</strong> on the saved version.</li>
             <li>Wait for all group members to finish.</li><li>Select <strong>Play Group</strong>.</li>

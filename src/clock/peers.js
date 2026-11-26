@@ -6,7 +6,7 @@ const https = require('node:https');
 const io = require('node:fs/promises');
 const { join } = require('node:path');
 const { performance } = require('node:perf_hooks');
-const { assetPath, availableBytes, digestPattern, hashFile, idPattern, maxAssetBytes, maxPatternBytes, patternFile, patternPath, privateDirectory, promote, receive, reserveBytes } = require('./library');
+const { assetPath, availableBytes, digestPattern, hashFile, idPattern, maxAssetBytes, maxPatternBytes, patternFile, patternPath, privateDirectory, promote, receive, reserveBytes, validMediaExtension } = require('./library');
 
 function announceDomain(packet) {
   if (packet.length < 64 || (packet[0] & 15) !== 11 || (packet[1] & 15) !== 2 ||
@@ -188,14 +188,14 @@ class Follower {
   }
 
   async prepare(node, base, assignment) {
-    const { revision, digest, length } = assignment;
+    const { revision, digest, length, extension } = assignment;
     if (!idPattern.test(revision) || !digestPattern.test(digest) || !Number.isSafeInteger(length) || length < 64 || length > maxAssetBytes) {
       throw new Error('Leader returned an invalid media assignment');
     }
-    const assets = assignment.assets ?? [{ digest, length }];
+    const assets = assignment.assets ?? [{ digest, length, extension }];
     if (!Array.isArray(assets) || assets.length < 1 || assets.length > 26 ||
-        !assets.some((asset) => asset?.digest === digest && asset.length === length) ||
-        assets.some((asset) => !digestPattern.test(asset?.digest) || !Number.isSafeInteger(asset.length) || asset.length < 64 || asset.length > maxAssetBytes)) {
+        !assets.some((asset) => asset?.digest === digest && asset.length === length && asset.extension === extension) ||
+        assets.some((asset) => !digestPattern.test(asset?.digest) || !validMediaExtension(asset.extension) || !Number.isSafeInteger(asset.length) || asset.length < 64 || asset.length > maxAssetBytes)) {
       throw new Error('Leader returned an invalid media replica list');
     }
     for (const file of assets) {
@@ -211,7 +211,7 @@ class Follower {
     this.ready = revision;
   }
 
-  async ensureAsset(node, endpoint, { digest, length }, path = assetPath(this.root, digest)) {
+  async ensureAsset(node, endpoint, { digest, length, extension }, path = assetPath(this.root, digest, extension)) {
     const local = await io.lstat(path).catch(() => null);
     if (local?.isFile() && !local.isSymbolicLink() && local.size === length && await hashFile(path) === digest) return;
     if ((await availableBytes(this.root)).freeBytes < length + reserveBytes) throw new Error('Insufficient free space for the assignment');

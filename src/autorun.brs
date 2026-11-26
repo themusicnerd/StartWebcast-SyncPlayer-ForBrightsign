@@ -500,13 +500,17 @@ Function PanelPlayback(panel As Object) As Object
     If panel.state <> "playing" And panel.state <> "paused" And panel.state <> "starting" Then Return current
     current.positionms = panel.video.GetPlaybackPosition()
     current.durationms = panel.video.GetDuration()
+    If panel.seamlessFile = true And current.durationms > 0 And current.positionms >= current.durationms Then
+        current.positionms = current.positionms - Int(current.positionms / current.durationms) * current.durationms
+    End If
+    current.seamless = panel.seamlessFile = true
     current.pausable = (panel.role <> "follower" Or panel.localOverride) And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
     current.seekable = current.pausable And not current.synced And current.durationms > 0
     Return current
 End Function
 
 Function PanelTransport(panel As Object, action As String, stamp As String) As String
-    If not PanelFileMedia(panel) Then Return "Play an MP4 to use this transport control."
+    If not PanelFileMedia(panel) Then Return "Play a video file to use this transport control."
     wanted = "paused"
     previous = "playing"
     If action = "resume" Then
@@ -590,7 +594,12 @@ End Function
 
 Function PanelAsset(panel As Object, digest As Dynamic) As String
     If not SafeHex(digest, 64) Then Return ""
-    Return panel.root + "library/assets/" + digest + ".mp4"
+    stem = panel.root + "library/assets/" + digest
+    matches = MatchFiles(panel.root + "library/assets/", digest + ".mov")
+    If Type(matches) = "roList" Or Type(matches) = "roArray" Then
+        If matches.Count() > 0 Then Return stem + ".mov"
+    End If
+    Return stem + ".mp4"
 End Function
 
 Function VerifiedAsset(panel As Object, digest As Dynamic) As Boolean
@@ -892,6 +901,16 @@ Sub PanelHtmlFeedback(panel As Object)
     End If
 End Sub
 
+Sub SetPanelFileLoop(panel As Object, path As String, forceRestart As Boolean)
+    If Right(path, 4) <> ".mov" And panel.movLoopMode <> true Then Return
+    panel.movLoopMode = Right(path, 4) = ".mov"
+    mode = "NoLoop"
+    If panel.nativeLoop = "seamless" And Right(path, 4) = ".mp4" Then mode = "SeamlessLoopOrNotAtAll"
+    panel.seamlessFile = Right(path, 4) = ".mov" And not forceRestart
+    If panel.seamlessFile Then mode = "SeamlessLoopOrNotAtAll"
+    If not panel.video.SetLoopMode(mode) Then panel.seamlessFile = false
+End Sub
+
 Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     If not panel.ready Then Return false
     If panel.identUntil = 0 Then HideStartupCard(panel)
@@ -906,6 +925,7 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     If m.holding <> invalid Then m.holding.Hide()
     If PanelLiveSource(panel) Then RememberLiveSource(panel)
     accepted = false
+    If PanelLiveSource(panel) Then SetPanelFileLoop(panel, "", true)
     If panel.source = "web" Then
         panel.video.StopClear()
         accepted = StartWebLayer(panel)
@@ -918,6 +938,8 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     Else
         path = panel.baseline
         If panel.asset <> "" Then path = PanelAsset(panel, panel.asset)
+        forceRestart = panel.settings.loop <> true Or panel.seamlessRejected = path
+        SetPanelFileLoop(panel, path, forceRestart)
         If panel.role = "leader" And (panel.source = "built-in" Or panel.source = "group") Then
             prefix = panel.baselinePrefix + "-" + panel.nativeLoop + "-"
             If panel.source = "group" Then prefix = "suite-play-" + panel.revision + "-"
@@ -927,8 +949,10 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
                 prefix = "suite-jump-" + clip + "-" + Mid(StrI(position), 2) + "-"
             End If
             panel.sequence = panel.sequence + 1
-            accepted = StartLeaderCycle(panel.manager, panel.video, path, prefix, panel.sequence, position)
-            If accepted Then panel.mediaCycle = prefix + Mid(StrI(panel.sequence), 2)
+            suffix = ""
+            If Right(path, 4) = ".mov" And not panel.seamlessFile Then suffix = "-r"
+            accepted = StartLeaderCycle(panel.manager, panel.video, path, prefix, panel.sequence, position, suffix)
+            If accepted Then panel.mediaCycle = prefix + Mid(StrI(panel.sequence), 2) + suffix
         Else
             accepted = panel.video.PlayFile({Filename: path})
         End If
@@ -1107,6 +1131,7 @@ Sub PanelFollow(panel As Object, event As Object)
     panel.loadAt = UpTime(0)
     panel.mediaCycle = ""
     panel.error = ""
+    SetPanelFileLoop(panel, path, Right(syncId, 2) = "-r")
     If PlayNative(panel.video, path, event, position) Then
         panel.mediaCycle = syncId
     Else
@@ -1131,12 +1156,22 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
         panel.state = "ended"
         panel.error = "The " + UCase(panel.source) + " stream ended or disconnected."
         ScheduleVideoRetry(panel)
+    Else If panel.seamlessFile = true Then
+        panel.seamlessFile = false
+        If (panel.role <> "follower" Or panel.localOverride) And panel.settings.loop And panel.settings.intent = "auto" Then
+            panel.seamlessRejected = PanelAsset(panel, panel.asset)
+            LogEvent("SEAMLESS_MEDIA_ENDED", {fallback: "reschedule"})
+            StartPanel(panel)
+        Else
+            StopPanel(panel, false)
+        End If
     Else If panel.nativeLoop = "seamless" Then
         StopPanel(panel, false)
         LogEvent("SEAMLESS_MEDIA_ENDED", {})
     Else If (panel.role <> "follower" Or panel.localOverride) And panel.settings.loop And panel.settings.intent = "auto" Then
         StartPanel(panel)
     Else
+        If panel.role = "leader" And PanelGroupMedia(panel) Then PanelSignal(panel, "suite-stop-")
         StopPanel(panel, false)
     End If
 End Sub
@@ -1381,7 +1416,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
     End If
     If action = "pause" Or action = "resume" Then
         playback = PanelPlayback(panel)
-        If not playback.pausable Then Return "Play an MP4 to use this transport control."
+        If not playback.pausable Then Return "Play a video file to use this transport control."
         If action = "pause" And panel.state = "paused" Then Return ""
         If action = "resume" And panel.state = "playing" Then Return ""
         stamp = ""
@@ -1400,13 +1435,13 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If playback.durationms = invalid Or body.positionms < 0 Then Return "Seek to a position inside the current clip."
         If body.positionms >= playback.durationms Then Return "Seek to a position inside the current clip."
         If action = "group-seek" Then
-            If panel.role <> "leader" Or not playback.synced Or not playback.pausable Or panel.manager = invalid Then Return "Play a Synced MP4 to Move the Group Playhead."
+            If panel.role <> "leader" Or not playback.synced Or not playback.pausable Or panel.manager = invalid Then Return "Play a Synced Video File to Move the Group Playhead."
             panel.video.StopClear()
             panel.retryDelay = 3
             If not StartPanel(panel, body.positionms) Then Return panel.error
             Return ""
         End If
-        If not playback.seekable Then Return "Play a local MP4 to use the playhead."
+        If not playback.seekable Then Return "Play a local video file to use the playhead."
         If not panel.video.Seek(body.positionms) Then Return "The native player rejected the seek."
         Return ""
     End If
@@ -1839,8 +1874,8 @@ Function SetNativeLeader(manager As Object, device As Object, leader As Boolean)
     Return current.leader = expected
 End Function
 
-Function StartLeaderCycle(manager As Object, video As Object, path As String, prefix As String, sequence As Integer, position = -1 As Integer) As Boolean
-    syncId = prefix + Mid(StrI(sequence), 2)
+Function StartLeaderCycle(manager As Object, video As Object, path As String, prefix As String, sequence As Integer, position = -1 As Integer, suffix = "" As String) As Boolean
+    syncId = prefix + Mid(StrI(sequence), 2) + suffix
     event = manager.Synchronize(syncId, 500)
     If event = invalid Then
         LogEvent("SYNC_SCHEDULE_FAILED", {sync_id: syncId})

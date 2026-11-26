@@ -3,7 +3,7 @@
 const { createHash, randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const io = require('node:fs/promises');
-const { basename, join } = require('node:path');
+const { basename, extname, join } = require('node:path');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const { compatible, inspectMp4 } = require('./mp4');
@@ -21,17 +21,17 @@ class RequestError extends Error {
 }
 
 function safeName(raw, members) {
-  if (typeof raw !== 'string') throw new RequestError(400, 'Provide the MP4 file name.');
+  if (typeof raw !== 'string') throw new RequestError(400, 'Provide the MP4 or MOV file name.');
   const filename = raw.normalize('NFC');
-  const suffixed = /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})[_. -]([a-z])\.mp4$/iu.exec(filename);
-  const plain = !suffixed && members.length === 1 ? /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})\.mp4$/iu.exec(filename) : null;
+  const suffixed = /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})[_. -]([a-z])\.(mp4|mov)$/iu.exec(filename);
+  const plain = !suffixed && members.length === 1 ? /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})\.(mp4|mov)$/iu.exec(filename) : null;
   const name = (suffixed || plain)?.[1];
   const target = suffixed?.[2].toUpperCase() || members[0];
   if (!name || name !== name.trim() || !members.includes(target)) {
     throw new RequestError(400, `Name the file like Welcome_${members[0]}.mp4 using one of ${members.join(', ')}.`);
   }
   const id = createHash('sha256').update(name.toLocaleLowerCase('en-AU')).digest('hex').slice(0, 24);
-  return { id, name, target };
+  return { id, name, target, extension: (suffixed?.[3] || plain[2]).toLowerCase() };
 }
 
 async function atomicJson(path, value) {
@@ -74,16 +74,21 @@ async function receive(source, temporary, length) {
   return hash.digest('hex');
 }
 
-function assetPath(root, digest) {
+function validMediaExtension(extension) {
+  return extension === undefined || extension === 'mp4' || extension === 'mov';
+}
+
+function assetPath(root, digest, extension = 'mp4') {
   if (!digestPattern.test(digest)) throw new RequestError(400, 'Invalid asset identifier.');
-  return join(root, 'assets', `${digest}.mp4`);
+  if (!validMediaExtension(extension)) throw new RequestError(400, 'Invalid media extension.');
+  return join(root, 'assets', `${digest}.${extension}`);
 }
 
 async function promote(temporary, destination, length) {
   try {
     const existing = await io.lstat(destination);
     if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Asset storage is not a regular file');
-    if (existing.size === length && (await hashFile(destination)) === basename(destination, '.mp4')) await io.unlink(temporary);
+    if (existing.size === length && (await hashFile(destination)) === basename(destination, extname(destination))) await io.unlink(temporary);
     else await io.rename(temporary, destination);
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
@@ -199,9 +204,9 @@ class Library {
   }
 
   async upload(rawName, source, length, replace, leader) {
-    const { id, name, target } = safeName(rawName, this.members);
+    const { id, name, target, extension } = safeName(rawName, this.members);
     if (!Number.isSafeInteger(length) || length < 64 || length > maxAssetBytes) {
-      throw new RequestError(413, 'Upload an MP4 between 64 bytes and 32 GiB.');
+      throw new RequestError(413, 'Upload a video between 64 bytes and 32 GiB.');
     }
     return this.transaction(async (next) => {
       const existing = next.sets[id];
@@ -215,15 +220,15 @@ class Library {
       try {
         const digest = await receive(source, stage, length);
         let metadata;
-        try { metadata = await inspectMp4(stage); } catch (error) { throw new RequestError(422, `MP4 check failed. ${error instanceof RangeError ? 'Invalid track metadata.' : error.message}`); }
+        try { metadata = await inspectMp4(stage, extension); } catch (error) { throw new RequestError(422, `Video check failed. ${error instanceof RangeError ? 'Invalid track metadata.' : error.message}`); }
         const other = Object.entries(set.draft).find(([member]) => member !== target);
-        if (other && !compatible(other[1].metadata, metadata)) {
+        if (other && ((other[1].extension || 'mp4') !== extension || !compatible(other[1].metadata, metadata))) {
           throw new RequestError(422, `The timing or format differs from Player ${other[0]}'s file in this draft.`);
         }
-        await promote(stage, assetPath(this.root, digest), length);
+        await promote(stage, assetPath(this.root, digest, extension), length);
         if (target === leader && !await this.probe(digest)) throw new RequestError(422, 'This XD236 rejected the uploaded video.');
         const replaced = set.draft[target]?.digest;
-        set.draft[target] = { digest, length, metadata };
+        set.draft[target] = { digest, length, metadata, ...(extension === 'mov' ? { extension } : {}) };
         const complete = completeDraft(set, this.members);
         next.sets[id] = set;
         return { id, name: set.name, player: target, complete, replaced };
@@ -297,10 +302,10 @@ class Library {
     if (!this.members.includes(player) || !job || (revision && revision !== job.revision)) return null;
     const { set, stored } = this.get(job.id, job.revision);
     if (!this.covers(stored)) return null;
-    const { digest, length } = stored.files[player];
+    const { digest, length, extension } = stored.files[player];
     const assets = job.replicateAll ? [...new Map(Object.values(stored.files).map((file) =>
-      [file.digest, { digest: file.digest, length: file.length }])).values()] : undefined;
-    return { revision: stored.revision, digest, length, name: set.name, ...(assets ? { assets } : {}) };
+      [file.digest, { digest: file.digest, length: file.length, ...(file.extension ? { extension: file.extension } : {}) }])).values()] : undefined;
+    return { revision: stored.revision, digest, length, ...(extension ? { extension } : {}), name: set.name, ...(assets ? { assets } : {}) };
   }
 
   covers(stored) {
@@ -354,11 +359,14 @@ class Library {
       for (const digest of digests) {
         const referenced = Object.values(this.state.sets).some(({ draft, revisions }) =>
           [draft, ...revisions.map((entry) => entry.files)].some((files) => Object.values(files).some((file) => file.digest === digest)));
-        if (!referenced) await io.unlink(assetPath(this.root, digest)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+        if (referenced) continue;
+        for (const extension of ['mp4', 'mov']) {
+          await io.unlink(assetPath(this.root, digest, extension)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+        }
       }
     } finally { this.busy = false; }
   }
 }
 
 module.exports = { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern,
-  hashFile, initStorage, maxAssetBytes, maxPatternBytes, patternFile, patternPath, privateDirectory, promote, receive, reserveBytes, safeName };
+  hashFile, initStorage, maxAssetBytes, maxPatternBytes, patternFile, patternPath, privateDirectory, promote, receive, reserveBytes, safeName, validMediaExtension };

@@ -1147,7 +1147,7 @@ class Suite {
     if (path === '/api/v1/uploads' && request.method === 'PUT') {
       this.ensureLibrary();
       if (this.transfers > 0) throw new RequestError(409, 'A player is downloading media. Try again after distribution.');
-      if (request.headers['content-type'] !== 'application/octet-stream') throw new RequestError(415, 'Upload the MP4 as an application/octet-stream body.');
+      if (request.headers['content-type'] !== 'application/octet-stream') throw new RequestError(415, 'Upload the video as an application/octet-stream body.');
       const result = await this.library.upload(url.searchParams.get('name'), request, Number(request.headers['content-length']), url.searchParams.get('replace') === '1', this.id);
       this.note(`Verified ${result.name} for Player ${result.player}`);
       if (result.replaced) await this.library.reap([result.replaced]).catch(() => {});
@@ -1438,7 +1438,7 @@ class Suite {
       const asset = match[5] ? assignment?.assets?.find(({ digest }) => digest === match[5]) : assignment;
       if (!asset) throw new RequestError(404, 'No matching assignment.');
       if (this.transfers >= 1 || this.library.busy) throw new RequestError(409, 'The transfer slot is busy.');
-      const path = assetPath(this.library.root, asset.digest);
+      const path = assetPath(this.library.root, asset.digest, asset.extension);
       const entry = await io.lstat(path);
       if (!entry.isFile() || entry.isSymbolicLink() || entry.size !== asset.length) throw new RequestError(503, 'The assigned file is unavailable.');
       this.transfers++;

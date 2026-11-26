@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.28
+
+- Accept and distribute fast-start MOV files with matching PCM audio for native seamless looping.
+- Fall back to a synchronised restart if native seamless playback reaches the end of the file.
+
 ## 0.2.27
 
 - Add shared PNG and JPEG test patterns and per-player patterns with A/B/C filename suffixes.

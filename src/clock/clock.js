@@ -590,8 +590,8 @@ function assignUploads(files) {
   const ids = dashboard?.native?.role === 'standalone' ? [dashboard.native.playerid] :
     (dashboard?.players || []).filter((player) => player.member).map(({ id }) => id);
   plan.replaceChildren(...files.map(({ name }) => {
-    const suffix = /[_. -]([a-z])\.mp4$/i.exec(name)?.[1].toUpperCase();
-    const assignment = !/\.mp4$/i.test(name) ? 'MP4 Required' : ids.includes(suffix) ? `Player ${suffix}` :
+    const suffix = /[_. -]([a-z])\.(?:mp4|mov)$/i.exec(name)?.[1].toUpperCase();
+    const assignment = !/\.(?:mp4|mov)$/i.test(name) ? 'MP4 or MOV Required' : ids.includes(suffix) ? `Player ${suffix}` :
       ids.length === 1 && !suffix ? `Player ${ids[0]}` : 'Add a Current Player Suffix';
     return item('li', `${name} → ${assignment}`);
   }));

@@ -9,7 +9,7 @@ SyncPlayer turns BrightSign XD236 players into a standalone media player or a wi
 ## What You Can Do
 
 - **Play and sync.** Run a player on its own or use native PTP and SyncManager for a wired A/B/C group. Pause, resume and seek from the console. Move the group playhead from any included player.
-- **Manage media.** Upload matching MP4s in one batch. Player suffixes such as `_A`, `_B` and `_C` assign each cut to its screen. Preview locally or distribute a verified revision to the group.
+- **Manage media.** Upload matching MP4 or PCM MOV files in one batch. Player suffixes such as `_A`, `_B` and `_C` assign each cut to its screen. Preview locally or distribute a verified revision to the group.
 - **Compose two layers.** Play MP4, SRT, RTSP or a webpage in the lower layer. Resize its window and add a full-screen HTML5 overlay above it. Save stream addresses and choose a local fallback clip.
 - **Monitor and control.** Arrange display previews in a shared layout. Check decoder timing estimates, SD storage and HDMI screen identity. Show IDENT or local colour bars, adjust audio and use HDMI-CEC for display power.
 - **Automate and update.** Use the authenticated REST API, HDMI-CEC transport or Art-Net and sACN inputs. Stage signed app updates from a local file or a GitHub branch.

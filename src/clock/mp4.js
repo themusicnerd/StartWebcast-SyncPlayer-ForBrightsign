@@ -40,7 +40,7 @@ function table(list, type, width, optional = false) {
   return bytes;
 }
 
-function timeline(tableBytes, constant) {
+function timeline(tableBytes, constant, sampleLimit = maxSamples) {
   let samples = 0;
   let duration = 0;
   const step = tableBytes.length >= 16 ? tableBytes.readUInt32BE(12) : 0;
@@ -51,7 +51,7 @@ function timeline(tableBytes, constant) {
     samples += count;
     duration += count * delta;
   }
-  requireMp4(samples > 0 && samples <= maxSamples && Number.isSafeInteger(duration), 'Invalid sample count or duration');
+  requireMp4(samples > 0 && samples <= sampleLimit && Number.isSafeInteger(duration), 'Invalid sample count or duration');
   return { samples, duration, step };
 }
 
@@ -97,11 +97,15 @@ function sampleBytes(list, media, expectedSamples) {
     if (mapEntry + 12 < map.length && map.readUInt32BE(mapEntry + 12) === chunk) mapEntry += 12;
     const count = map.readUInt32BE(mapEntry + 4);
     requireMp4(map.readUInt32BE(mapEntry + 8) === 1 && count > 0 && sample + count <= expectedSamples, 'Invalid sample mapping');
-    let length = 0;
-    for (let index = 0; index < count; index++, sample++) {
-      const size = fixed || sizeTable.readUInt32BE(12 + sample * 4);
-      requireMp4(size > 0, 'Empty media sample');
-      length += size;
+    let length = fixed * count;
+    if (fixed) {
+      sample += count;
+    } else {
+      for (let index = 0; index < count; index++, sample++) {
+        const size = sizeTable.readUInt32BE(12 + sample * 4);
+        requireMp4(size > 0, 'Empty media sample');
+        length += size;
+      }
     }
     const start = offsets ? chunks.readUInt32BE(8 + (chunk - 1) * 4) : Number(chunks.readBigUInt64BE(8 + (chunk - 1) * 8));
     requireMp4(Number.isSafeInteger(start) && start >= previousEnd && start >= media.start && start + length <= media.end, 'Sample data is outside the media box');
@@ -170,8 +174,16 @@ function descriptor(bytes, offset, tag) {
   throw new Error('Invalid AAC descriptor');
 }
 
-function audioDescription(entry) {
+function audioDescription(entry, quickTime) {
   const data = entry.bytes;
+  if (quickTime && entry.type === 'sowt') {
+    requireMp4(data.length >= 28 && data.readUInt16BE(8) === 0 && data.readUInt16BE(18) === 16,
+      'Use 16-bit little-endian PCM (sowt) audio');
+    const channels = data.readUInt16BE(16);
+    const rate = data.readUInt16BE(24);
+    requireMp4([1, 2].includes(channels) && [44100, 48000].includes(rate), 'Use mono or stereo PCM at 44.1 or 48 kHz');
+    return { codec: 'PCM', channels, rate };
+  }
   requireMp4(entry.type === 'mp4a' && data.length >= 28 && data.readUInt16BE(8) === 0, 'Use AAC-LC audio');
   const es = descriptor(one(boxes(data, 28), 'esds'), 4, 3);
   requireMp4(es.length >= 3 && !(es[2] & 224), 'Unsupported AAC stream descriptor');
@@ -185,11 +197,11 @@ function audioDescription(entry) {
   return { codec: 'AAC-LC', channels, rate };
 }
 
-function inspectTrack(track, media, movieScale) {
+function inspectTrack(track, media, movieScale, quickTime) {
   const children = boxes(track);
   const mdia = boxes(one(children, 'mdia'));
   const handler = one(mdia, 'hdlr').toString('ascii', 8, 12);
-  requireMp4(['vide', 'soun'].includes(handler), 'Use one video track and optional AAC audio');
+  requireMp4(['vide', 'soun'].includes(handler), 'Use one video track and optional supported audio');
   const header = one(mdia, 'mdhd');
   const scale = header.readUInt32BE(header[0] === 1 ? 20 : 12);
   requireMp4(scale > 0, 'Invalid track timescale');
@@ -198,7 +210,8 @@ function inspectTrack(track, media, movieScale) {
   requireMp4(entries.length === 1, 'Use one sample description per track');
   const timing = table(list, 'stts', 8);
   const video = handler === 'vide';
-  const { samples, duration, step } = timeline(timing, video);
+  const pcm = !video && quickTime && entries[0].type === 'sowt';
+  const { samples, duration, step } = timeline(timing, video || pcm, pcm ? 48_000 * 24 * 3600 : maxSamples);
   const size = sampleBytes(list, media, samples);
   const edits = one(children, 'edts', true);
   const edit = edits ? one(boxes(edits), 'elst') : Buffer.alloc(0);
@@ -207,8 +220,14 @@ function inspectTrack(track, media, movieScale) {
       edit.readUInt32BE(edit.length - 4) === 65536, 'Use a single continuous media edit');
   }
   if (!video) {
-    requireMp4(size * 8 * scale / duration <= 512000, 'Audio bitrate exceeds the ingest limit');
-    return { type: 'audio', ...audioDescription(entries[0]), samples, duration, scale,
+    const description = audioDescription(entries[0], quickTime);
+    if (pcm) {
+      requireMp4(scale === description.rate && step === 1 && duration === samples &&
+        one(list, 'stsz').readUInt32BE(4) === description.channels * 2, 'Invalid PCM sample layout');
+    } else {
+      requireMp4(size * 8 * scale / duration <= 512000, 'Audio bitrate exceeds the ingest limit');
+    }
+    return { type: 'audio', ...description, samples, duration, scale,
       timing: createHash('sha256').update(timing).update(edit).digest('hex') };
   }
   const desc = entries[0].bytes;
@@ -224,7 +243,7 @@ function inspectTrack(track, media, movieScale) {
     timing: createHash('sha256').update(edit).digest('hex') };
 }
 
-async function inspectMp4(path) {
+async function inspectMp4(path, extension = 'mp4') {
   const file = await open(path, 'r');
   try {
     const { size } = await file.stat();
@@ -233,6 +252,7 @@ async function inspectMp4(path) {
     let movie;
     let media;
     let fileType = false;
+    const quickTime = extension === 'mov';
     let topLevel = 0;
     while (position < size) {
       const { bytesRead } = await file.read(header, 0, 16, position);
@@ -243,7 +263,13 @@ async function inspectMp4(path) {
       if (length === 1 && bytesRead === 16) length = Number(header.readBigUInt64BE(8));
       if (!length) length = size - position;
       requireMp4(Number.isSafeInteger(length) && length >= headerSize && position + length <= size, 'Invalid MP4 container length');
-      if (type === 'ftyp') fileType = true;
+      if (type === 'ftyp') {
+        requireMp4(!fileType && length >= headerSize + 8, 'Invalid file type box');
+        const brand = Buffer.alloc(4);
+        await file.read(brand, 0, 4, position + headerSize);
+        requireMp4((brand.toString('ascii') === 'qt  ') === quickTime, 'The container does not match the file extension');
+        fileType = true;
+      }
       if (type === 'moov') {
         requireMp4(!movie && !media && length <= maxMetadata, 'Export a fast-start MP4 with metadata at the front');
         movie = Buffer.alloc(length - headerSize);
@@ -263,10 +289,14 @@ async function inspectMp4(path) {
     const movieScale = movieHeader.readUInt32BE(movieHeader[0] === 1 ? 20 : 12);
     requireMp4(movieScale > 0, 'Invalid movie timescale');
     const tracks = headers.filter((box) => box.type === 'trak');
-    requireMp4(tracks.length > 0 && tracks.length <= 2, 'Use one video track and optional AAC audio');
-    const parsed = tracks.map(({ bytes }) => inspectTrack(bytes, media, movieScale));
+    requireMp4(tracks.length > 0 && tracks.length <= 2, 'Use one video track and optional supported audio');
+    const parsed = tracks.map(({ bytes }) => inspectTrack(bytes, media, movieScale, quickTime));
     const video = parsed.find((track) => track.type === 'video');
     const audio = parsed.find((track) => track.type === 'audio') || null;
+    if (quickTime) {
+      requireMp4(video && audio?.codec === 'PCM' && Math.abs(audio.duration / audio.scale - video.duration / video.scale) <= 0.001,
+        'Use matched video and PCM audio durations for MOV');
+    }
     requireMp4(video && parsed.filter((track) => track.type === 'video').length === 1, 'Use one video track');
     return { video, audio, seconds: video.duration / video.scale };
   } finally {
