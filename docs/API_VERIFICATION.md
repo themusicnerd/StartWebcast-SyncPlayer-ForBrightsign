@@ -2,6 +2,14 @@
 
 Reference documentation reviewed on 26 November 2026. Sections below record the API signatures and physical results available for each feature.
 
+## 0.2.13 Three-Player Playback and Updates
+
+All three XD236 players booted the same signed package at `3840x2160x50p`. The leader package came from the GitHub branch through the workstation. Both followers accepted the local signed file. Each console listed the named SD card presentation. The leader distributed the 30-second, 25 fps Sync Test set, and all three devices verified their assigned MP4.
+
+Live playhead requests on B, C and A moved all three native decoders into a new group playback cycle at 45, 95 and 150 seconds respectively. The leader estimated relative decoder spread of 44, 20 and 36 ms from the reports. These figures describe decoder positions and include report timing variation. HDMI output frame alignment requires a separate measurement. The group jump uses a native `roSyncManager.Synchronize()` timestamp and derives the file's media origin with `roDateTime.SubtractMilliseconds()` before passing it to `roVideoPlayer.PlayFile()`. [BrightSign Video Wall Sync](https://docs.brightsign.biz/technical/video-wall-sync-architecture) · [Video Player](https://docs.brightsign.biz/develop/rovideoplayer) · [roDateTime](https://docs.brightsign.biz/develop/rodatetime)
+
+Playback continued on all three with the display schedule requesting standby after 21:00 Sydney time. The operator confirmed that the TCL on Player A responded to CEC Standby. The Samsung Frame on Player B stayed on. The leader disabled Player B's HDMI audio independently and restored it after readback. All three report HDMI audio enabled and the Australian NTP pool configured. The players reported a name resolution failure on the tested network. [Samsung Anynet+](https://www.samsung.com/au/support/tv-audio-video/what-is-anynet-plus/)
+
 ## 0.2.5 Playback, Display and Updates
 
 Player A at `3840x2160x50p` reported native positions of 79,000 ms, 80,360 ms and 81,360 ms in successive console samples. Local `Pause()` held the reported position at 1,400 ms. `Seek(45000)` moved to 45,000 ms while paused. `Resume()` advanced the decoder. The test restored the card presentation. Group transport uses `Pause(parameters As roAssociativeArray)` and `Resume(parameters As roAssociativeArray)` with native `SyncIsoTimeStamp`. [BrightSign Video Player](https://docs.brightsign.biz/develop/rovideoplayer)

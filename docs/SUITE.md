@@ -10,6 +10,8 @@ The top bar shows HDMI-reported TV power. **Power On** and **Standby** send loca
 
 **Media Library** lists the presentation already on the SD card and any media you upload. The generated **Sync Test** clips include a frame counter and a short tone for each second. [Sync Test Clips](../test-content)
 
+At startup the player restores the last saved MP4 selection and starts it from the beginning. Stop and Blackout are saved startup states. Local previews, SRT feeds and webpages apply to the current session. A group library selection waits for the matching media on its followers.
+
 Set **Output Rotation** in **HDMI & Audio**. Select 0°, 90°, 180° or 270° clockwise for each player. Save the setting to restart that player. The video and graphics layers rotate together, and the layout window follows the rotated coordinates. [Video Rotation API](https://docs.brightsign.biz/develop/rovideoplayer) · [HTML Widget Rotation](https://docs.brightsign.biz/develop/rohtmlwidget)
 
 All players use HDMI audio by default. Use **Enable Audio** or **Disable Audio** in **Group Membership** on the leader to select any combination of players. In **HDMI & Audio**, set the local audio, volume or mute. The group audio state displays Pending until the follower acknowledges the change.
