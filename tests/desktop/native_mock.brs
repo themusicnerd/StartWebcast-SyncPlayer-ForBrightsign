@@ -32,6 +32,59 @@ Sub Main()
     config.output_mode = "auto"
     Check(not ValidConfig(config), "automatic mode is unavailable for synced cards")
 
+    config.output_mode = "3840x2160x50p"
+    profile = {address: "192.168.1.12", netmask: "255.255.255.0", broadcast: "192.168.1.255"}
+    schedule = {timezone: "Australia/Sydney", on: "07:00", off: "21:00"}
+    config.static_ipv4 = profile
+    config.display_schedule = schedule
+    config.loop_mode = "reschedule"
+    Check(ValidConfig(config), "static IP and daily Sydney schedule")
+    profile.address = "192.168.1.11"
+    Check(not ValidConfig(config), "card cannot claim another player's IP")
+    profile.address = "192.168.1.12"
+    profile.broadcast = "192.168.2.255"
+    Check(not ValidConfig(config), "wrong broadcast rejected")
+    profile.broadcast = "192.168.1.255"
+    schedule.off = "25:00"
+    Check(not ValidConfig(config), "invalid stop time rejected")
+    schedule.off = "21:00"
+    Check(not MatchesStaticIPv4({dhcp: true, ip4_address: profile.address, ip4_netmask: profile.netmask}, profile), "DHCP address is not provisioned")
+    Check(MatchesStaticIPv4({dhcp: false, ip4_address: profile.address, ip4_netmask: profile.netmask}, profile), "confirmed static address")
+
+    network = {
+        SetIP4Address: FakeSetIP
+        SetIP4Netmask: FakeSetMask
+        SetIP4Broadcast: FakeSetBroadcast
+        Apply: FakeApply
+        sequence: ""
+        rejectMask: false
+    }
+    Check(ApplyStaticIPv4(network, profile), "static network staged and applied")
+    Check(network.sequence = "192.168.1.12/255.255.255.0/192.168.1.255/apply", "network API order and values")
+    network.rejectMask = true
+    network.sequence = ""
+    Check(not ApplyStaticIPv4(network, profile) And network.sequence = "192.168.1.12/255.255.255.0", "failed setter prevents Apply")
+
+    clock = {IsValid: FakeClockValid, GetZoneDateTime: FakeZonedTime, timeValid: true}
+    clock.localTime = {GetHour: FakeHour, GetMinute: FakeMinute, hour: 6, minute: 59}
+    Check(not ScheduleAllows(clock, schedule), "off at 06:59")
+    clock.localTime.hour = 7
+    clock.localTime.minute = 0
+    Check(ScheduleAllows(clock, schedule) And clock.zone = "AEST", "wake at 07:00 Sydney")
+    clock.localTime.hour = 20
+    clock.localTime.minute = 59
+    Check(ScheduleAllows(clock, schedule), "on at 20:59")
+    clock.localTime.hour = 21
+    clock.localTime.minute = 0
+    Check(not ScheduleAllows(clock, schedule), "standby at 21:00")
+    clock.timeValid = false
+    clock.localTime.hour = 12
+    Check(not ScheduleAllows(clock, schedule), "invalid RTC stays out of the on window")
+
+    standbyVideo = {StopClear: FakeStopClear, cleared: false}
+    SetDisplayState(standbyVideo, invalid, false)
+    Check(standbyVideo.cleared, "standby stops playback even without a CEC interface")
+
     video = {
         PlayFile: FakePlayFile
         accept: true
@@ -115,5 +168,47 @@ End Function
 
 Function FakeSetAsLeader(leader As Boolean) As Boolean
     m.leader = leader
+    Return true
+End Function
+
+Function FakeSetIP(address As String) As Boolean
+    m.sequence = address
+    Return true
+End Function
+
+Function FakeSetMask(mask As String) As Boolean
+    m.sequence = m.sequence + "/" + mask
+    Return not m.rejectMask
+End Function
+
+Function FakeSetBroadcast(broadcast As String) As Boolean
+    m.sequence = m.sequence + "/" + broadcast
+    Return true
+End Function
+
+Function FakeApply() As Boolean
+    m.sequence = m.sequence + "/apply"
+    Return true
+End Function
+
+Function FakeClockValid() As Boolean
+    Return m.timeValid
+End Function
+
+Function FakeZonedTime(zone As String) As Object
+    m.zone = zone
+    Return m.localTime
+End Function
+
+Function FakeHour() As Integer
+    Return m.hour
+End Function
+
+Function FakeMinute() As Integer
+    Return m.minute
+End Function
+
+Function FakeStopClear() As Boolean
+    m.cleared = true
     Return true
 End Function

@@ -30,19 +30,35 @@ Sub RunPlayback(port As Object)
         Return
     End If
 
-    mode = CreateObject("roVideoMode")
-    If mode = invalid Then
-        LogEvent("VIDEO_MODE_UNAVAILABLE", {})
-        Return
-    End If
     cardId = config.card_player_id
-    If cardId <> invalid Then m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
-
     network = CreateObject("roNetworkConfiguration", "eth0")
     If network = invalid Then
         LogEvent("NETWORK_INTERFACE_UNAVAILABLE", {interface_name: "eth0"})
         Return
     End If
+    If config.static_ipv4 <> invalid Then
+        m.playerId = cardId
+        If not ProvisionStaticIPv4(network, config.static_ipv4, port) Then Return
+    End If
+
+    scheduled = config.display_schedule <> invalid
+    clock = invalid
+    If scheduled Then
+        clock = CreateObject("roSystemTime")
+        If clock = invalid Then
+            LogEvent("SCHEDULE_CLOCK_UNAVAILABLE", {})
+        Else If UCase(clock.GetTimeZone()) <> "AEST" Then
+            If not clock.SetTimeZone("AEST") Then LogEvent("TIME_ZONE_REJECTED", {})
+        End If
+    End If
+
+    mode = CreateObject("roVideoMode")
+    If mode = invalid Then
+        LogEvent("VIDEO_MODE_UNAVAILABLE", {})
+        Return
+    End If
+    If cardId <> invalid Then m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
+
     address = WaitForAddress(network, config.players, port)
     If address = "" Then Return
 
@@ -129,34 +145,84 @@ Sub RunPlayback(port As Object)
     video.SetPort(port)
 
     syncPrefix = contentId + "-" + config.loop_mode + "-"
-    sequence = 1
+    wakePrefix = contentId + "-wake-"
+    sleepPrefix = contentId + "-standby-"
+    sequence = 0
     lastTimestamp = ""
     lastId = ""
+    screensOn = not scheduled
+    previousSchedule = invalid
+    cec = invalid
+    waitMs = 0
+    If scheduled Then
+        cec = CreateObject("roCecInterface")
+        If cec = invalid Then LogEvent("CEC_UNAVAILABLE", {})
+        If m.holding <> invalid Then m.holding.Hide()
+        If leader Then waitMs = 1000
+    End If
     LogEvent("NATIVE_READY", {output_mode: mode.GetMode(), ptp_domain: config.ptp_domain, genlock_requested: config.enable_genlock, sync_quality: "unknown"})
 
     If leader Then
         ' Allow the wired clock service to settle. This does not establish lock.
         Sleep(10000)
-        If not StartLeaderCycle(manager, video, mediaPath, syncPrefix, sequence) Then Return
+        If not scheduled Then
+            sequence = 1
+            If not StartLeaderCycle(manager, video, mediaPath, syncPrefix, sequence) Then Return
+        End If
     End If
 
     While true
-        event = Wait(0, port)
+        If leader And scheduled Then
+            desired = ScheduleAllows(clock, config.display_schedule)
+            If previousSchedule = invalid Or desired <> previousSchedule Then
+                previousSchedule = desired
+                screensOn = desired
+                sequence = sequence + 1
+                statePrefix = sleepPrefix
+                If screensOn Then statePrefix = wakePrefix
+                stateEvent = manager.Synchronize(statePrefix + Mid(StrI(sequence), 2), 0)
+                If stateEvent = invalid Then LogEvent("DISPLAY_STATE_BROADCAST_FAILED", {wake: screensOn})
+                SetDisplayState(video, cec, screensOn)
+
+                If screensOn Then
+                    ' Screen warm-up is separate from the native playback start.
+                    Sleep(8000)
+                    If ScheduleAllows(clock, config.display_schedule) Then
+                        sequence = sequence + 1
+                        If not StartLeaderCycle(manager, video, mediaPath, syncPrefix, sequence) Then Return
+                    End If
+                End If
+            End If
+        End If
+
+        event = Wait(waitMs, port)
         eventType = Type(event)
         If eventType = "roSyncManagerEvent" And not leader Then
             syncId = event.GetId()
             timestamp = event.GetIsoTimestamp()
-            If event.GetDomain() = config.group_id And Left(syncId, Len(syncPrefix)) = syncPrefix And Len(syncId) <= 64 And Len(timestamp) > 0 And Len(timestamp) <= 64 Then
+            playing = Left(syncId, Len(syncPrefix)) = syncPrefix
+            wake = scheduled And Left(syncId, Len(wakePrefix)) = wakePrefix
+            standby = scheduled And Left(syncId, Len(sleepPrefix)) = sleepPrefix
+            If event.GetDomain() = config.group_id And (playing Or wake Or standby) And Len(syncId) <= 64 And Len(timestamp) > 0 And Len(timestamp) <= 64 Then
                 If syncId <> lastId Or timestamp <> lastTimestamp Then
                     lastId = syncId
                     lastTimestamp = timestamp
-                    PlayNative(video, mediaPath, event)
+                    If standby Then
+                        screensOn = false
+                        SetDisplayState(video, cec, false)
+                    Else
+                        If not screensOn Then
+                            screensOn = true
+                            SetDisplayState(video, cec, true)
+                        End If
+                        If playing Then PlayNative(video, mediaPath, event)
+                    End If
                 End If
             End If
         Else If eventType = "roVideoEvent" Then
             eventCode = event.GetInt()
             LogEvent("NATIVE_VIDEO_EVENT", {code: eventCode})
-            If eventCode = 8 Then
+            If eventCode = 8 And screensOn Then
                 If config.loop_mode = "seamless" Then
                     video.StopClear()
                     LogEvent("SEAMLESS_MEDIA_ENDED", {})
@@ -200,12 +266,90 @@ Function ValidConfig(config As Dynamic) As Boolean
     If Len(config.leader_id) <> 1 Then Return false
     If Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.leader_id) = 0 Then Return false
     If not ids.DoesExist(config.leader_id) Then Return false
-    If config.card_player_id = invalid Then Return config.output_mode = invalid
+    If config.card_player_id = invalid Then
+        Return config.output_mode = invalid And config.static_ipv4 = invalid And config.display_schedule = invalid
+    End If
     If not TextValue(config.card_player_id) Or not TextValue(config.output_mode) Then Return false
     If Len(config.card_player_id) <> 1 Or Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.card_player_id) = 0 Then Return false
     If not ids.DoesExist(config.card_player_id) Then Return false
-    Return config.output_mode = "3840x2160x50p" Or config.output_mode = "1920x1080x50p"
+    If config.output_mode <> "3840x2160x50p" And config.output_mode <> "1920x1080x50p" Then Return false
+    If config.static_ipv4 <> invalid Then
+        If not ValidStaticIPv4(config.static_ipv4, config.players, config.card_player_id) Then Return false
+    End If
+    If config.display_schedule <> invalid Then
+        If not ValidDisplaySchedule(config.display_schedule) Or config.loop_mode <> "reschedule" Then Return false
+    End If
+    Return true
 End Function
+
+Function ValidStaticIPv4(profile As Dynamic, players As Object, cardId As String) As Boolean
+    If Type(profile) <> "roAssociativeArray" Then Return false
+    If not TextValue(profile.address) Or not TextValue(profile.broadcast) Or not TextValue(profile.netmask) Then Return false
+    If profile.netmask <> "255.255.255.0" Or players[profile.address] <> cardId Then Return false
+    dot = Instr(1, profile.address, ".")
+    For index = 1 To 2
+        If dot = 0 Then Return false
+        dot = Instr(dot + 1, profile.address, ".")
+    End For
+    If dot = 0 Then Return false
+    octet = Mid(profile.address, dot + 1)
+    hostNumber = StrToI(octet)
+    If hostNumber < 1 Or hostNumber > 254 Or Mid(StrI(hostNumber), 2) <> octet Then Return false
+    Return profile.broadcast = Left(profile.address, dot) + "255"
+End Function
+
+Function ValidDisplaySchedule(schedule As Dynamic) As Boolean
+    If Type(schedule) <> "roAssociativeArray" Then Return false
+    If not TextValue(schedule.timezone) Then Return false
+    If schedule.timezone <> "Australia/Sydney" Then Return false
+    If not TextValue(schedule.on) Or not TextValue(schedule.off) Then Return false
+    onMinute = MinuteOfDay(schedule.on)
+    offMinute = MinuteOfDay(schedule.off)
+    Return onMinute >= 0 And offMinute > onMinute
+End Function
+
+Function MinuteOfDay(value As String) As Integer
+    If Len(value) <> 5 Or Mid(value, 3, 1) <> ":" Then Return -1
+    For Each index In [1, 2, 4, 5]
+        If Instr(1, "0123456789", Mid(value, index, 1)) = 0 Then Return -1
+    End For
+    hours = StrToI(Left(value, 2))
+    minutes = StrToI(Right(value, 2))
+    If hours > 23 Or minutes > 59 Then Return -1
+    Return hours * 60 + minutes
+End Function
+
+Function ScheduleAllows(clock As Dynamic, schedule As Object) As Boolean
+    If clock = invalid Then Return false
+    If not clock.IsValid() Then Return false
+    localTime = clock.GetZoneDateTime("AEST")
+    If localTime = invalid Then Return false
+    current = localTime.GetHour() * 60 + localTime.GetMinute()
+    Return current >= MinuteOfDay(schedule.on) And current < MinuteOfDay(schedule.off)
+End Function
+
+Sub SetDisplayState(video As Object, cec As Dynamic, wake As Boolean)
+    If wake Then
+        If m.holding <> invalid Then m.holding.Show()
+    Else
+        video.StopClear()
+        If m.holding <> invalid Then m.holding.Hide()
+    End If
+    If cec = invalid Then Return
+
+    ' Low nibble 0 addresses the TV. BrightSign supplies the initiator nibble.
+    packet = CreateObject("roByteArray")
+    If wake Then
+        packet.FromHexString("0004") ' Image View On
+        cec.SendRawMessage(packet)
+        packet = CreateObject("roByteArray")
+        packet.FromHexString("0F820000") ' Active Source, with the physical address filled by BrightSign
+    Else
+        packet.FromHexString("0036") ' Standby
+    End If
+    cec.SendRawMessage(packet)
+    LogEvent("CEC_COMMAND_SENT", {wake: wake})
+End Sub
 
 Function ShowHolding(mode As Object, path As String) As Dynamic
     ' Keep the graphics below the hardware video. It remains visible whenever the video plane is clear.
@@ -254,14 +398,65 @@ Function TextValue(value As Dynamic) As Boolean
     Return kind = "String" Or kind = "roString"
 End Function
 
+Function ProvisionStaticIPv4(network As Object, profile As Object, port As Object) As Boolean
+    registry = CreateObject("roRegistrySection", "StartSyncPlayer")
+    If registry = invalid Then
+        RecordStaticStatus("STATIC_IPV4_REGISTRY_UNAVAILABLE", profile.address)
+        Return false
+    End If
+    signature = profile.address + "/" + profile.netmask
+    If registry.Read("static_eth0") = signature Then Return true
+
+    If not MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then
+        RecordStaticStatus("STATIC_IPV4_APPLYING", profile.address)
+        If not ApplyStaticIPv4(network, profile) Then
+            RecordStaticStatus("STATIC_IPV4_APPLY_FAILED", profile.address)
+            Return false
+        End If
+        For attempt = 1 To 30
+            If MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then Exit For
+            Wait(1000, port)
+        End For
+        If not MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then
+            RecordStaticStatus("STATIC_IPV4_NOT_CONFIRMED", profile.address)
+            Return false
+        End If
+    End If
+    If not registry.Write("static_eth0", signature) Or not registry.Flush() Then
+        RecordStaticStatus("STATIC_IPV4_MARKER_FAILED", profile.address)
+        Return false
+    End If
+    RecordStaticStatus("STATIC_IPV4_READY", profile.address)
+    Return true
+End Function
+
+Function ApplyStaticIPv4(network As Object, profile As Object) As Boolean
+    If not network.SetIP4Address(profile.address) Then Return false
+    If not network.SetIP4Netmask(profile.netmask) Then Return false
+    If not network.SetIP4Broadcast(profile.broadcast) Then Return false
+    Return network.Apply()
+End Function
+
+Function MatchesStaticIPv4(current As Dynamic, profile As Object) As Boolean
+    If Type(current) <> "roAssociativeArray" Then Return false
+    Return current.dhcp = false And current.ip4_address = profile.address And current.ip4_netmask = profile.netmask
+End Function
+
+Sub RecordStaticStatus(status As String, address As String)
+    LogEvent(status, {ip: address})
+    WriteAsciiFile(GetDefaultDrive() + "network-setup.txt", status + " " + address + Chr(13) + Chr(10))
+End Sub
+
 Function WaitForAddress(network As Object, players As Object, port As Object) As String
     LogEvent("WAITING_FOR_ETH0", {})
     address = ""
     For attempt = 1 To 45
         current = network.GetCurrentConfig()
-        If current <> invalid Then
-            address = current.ip4_address
-            If current.link And address <> "" And players.DoesExist(address) Then Return address
+        If Type(current) = "roAssociativeArray" Then
+            If TextValue(current.ip4_address) Then
+                address = current.ip4_address
+                If current.link = true And address <> "" And players.DoesExist(address) Then Return address
+            End If
         End If
         Wait(1000, port)
     End For
@@ -355,7 +550,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.1.1"
+    fields.version = "0.1.2"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)

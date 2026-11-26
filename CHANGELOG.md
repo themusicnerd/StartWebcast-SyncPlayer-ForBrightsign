@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2 · 26 November 2026
+
+- Configure A, B and C with the static IPv4 settings carried by their individual cards, before playback setup.
+- Add daily Sydney-time display wake and standby via HDMI-CEC, with playback starts coordinated through native SyncManager.
+
 ## 0.1.1 · 26 November 2026
 
 - Prepare individual A/B/C cards from matching 4K25 HEVC and AAC MP4s, with byte-for-byte copy verification.

@@ -1,6 +1,6 @@
 # Start SyncPlayer
 
-Start Webcast's native three-player XD236 sync proof of concept, version **0.1.1**. It boots from microSD, plays a distinct frame-counter clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Hardware acceptance is pending.
+Start Webcast's native three-player XD236 sync proof of concept, version **0.1.2**. It boots from microSD, plays a distinct frame-counter clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Hardware acceptance is pending.
 
 | Screen | Role | Primary Ethernet address |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Use the same release ZIP on all three players. [SD quick start](docs/SD-QUICK-ST
 
 ## Prepared content cards
 
-Use [the content card guide](docs/CONTENT-CARDS.md) to prepare or copy dedicated A/B/C cards that play a matched 4K25 set with a holding image. The card build preserves the MP4s, shows the holding image during startup and sends audio from the leader over HDMI.
+Use [the content card guide](docs/CONTENT-CARDS.md) to prepare or copy dedicated A/B/C cards that play a matched 4K25 set with a holding image. The card build preserves the MP4s, shows the holding image during startup and sends audio from the leader over HDMI. It commissions each player's static IPv4 address and runs a daily 07:00–21:00 Sydney HDMI-CEC schedule.
 
 ## Build and verify
 

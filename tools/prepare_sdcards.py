@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from fractions import Fraction
+from ipaddress import IPv4Interface
 from pathlib import Path
 
 from build_release import ROOT, fast_start, json_bytes, load_config, run, sha256
@@ -161,17 +162,10 @@ def prepare(name, content, output, ffmpeg, ffprobe):
         config["group_id"] = f"presentation-{group_digest[:24]}"
         for player in IDS:
             directory = staged / targets[player].name
-            shutil.copyfile(ROOT / "src/autorun.brs", directory / "autorun.brs")
-            (directory / "syncplayer.json").write_bytes(json_bytes(config | {"card_player_id": player}))
-            shutil.copyfile(ROOT / "VERSION", directory / "VERSION")
-            manifest = {
-                path.relative_to(directory).as_posix(): sha256(path)
-                for path in directory.rglob("*")
-                if path.is_file() and path.suffix != ".mp4"
-            }
-            manifest[f"media/Presentation_{player}.mp4"] = digests[player]
-            checksums = "".join(f"{digest}  {path}\n" for path, digest in sorted(manifest.items()))
-            (directory / "SHA256SUMS").write_bytes(checksums.encode("ascii"))
+            write_card_boot_files(directory, config, player, {
+                "media/HOLDING.jpeg": sha256(directory / "media/HOLDING.jpeg"),
+                f"media/Presentation_{player}.mp4": digests[player],
+            })
 
         card_targets(output)
         for target in targets.values():
@@ -179,6 +173,28 @@ def prepare(name, content, output, ffmpeg, ffprobe):
                 target.rmdir()
             (staged / target.name).rename(target)
     print(f"Prepared and verified {reference[0]} matched frames per screen in {output}")
+
+
+def write_card_boot_files(directory, config, player, media_manifest):
+    address = next(ip for ip, player_id in config["players"].items() if player_id == player)
+    profile = IPv4Interface(f"{address}/24")
+    card_config = config | {
+        "card_player_id": player,
+        "static_ipv4": {
+            "address": str(profile.ip),
+            "netmask": str(profile.netmask),
+            "broadcast": str(profile.network.broadcast_address),
+        },
+        "display_schedule": {"timezone": "Australia/Sydney", "on": "07:00", "off": "21:00"},
+    }
+    shutil.copyfile(ROOT / "src/autorun.brs", directory / "autorun.brs")
+    (directory / "syncplayer.json").write_bytes(json_bytes(card_config))
+    shutil.copyfile(ROOT / "VERSION", directory / "VERSION")
+    manifest = media_manifest | {
+        name: sha256(directory / name) for name in ("autorun.brs", "syncplayer.json", "VERSION")
+    }
+    checksums = "".join(f"{digest}  {name}\n" for name, digest in sorted(manifest.items()))
+    (directory / "SHA256SUMS").write_bytes(checksums.encode("ascii"))
 
 
 def main():
