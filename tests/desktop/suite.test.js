@@ -134,14 +134,14 @@ test('decoder report spread estimates elapsed time while playing and measures pa
   const playback = { synced: true, cycle: 'shared', state: 'playing' };
   const now = 3000;
   const players = [
-    { member: true, receivedAt: 1000, status: { ...playback, positionms: 1000 } },
-    { member: true, receivedAt: 2500, status: { ...playback, positionms: 2540 } },
+    { id: 'A', connection: 'local', member: true, receivedAt: 1000, status: { ...playback, positionms: 1000 } },
+    { id: 'B', connection: 'online', member: true, receivedAt: 2500, status: { ...playback, positionms: 2540 } },
   ];
-  assert.deepEqual(decoderTiming(players, playback, now), { count: 2, expected: 2, state: 'aligned', spreadMs: 40, estimated: true });
+  assert.deepEqual(decoderTiming(players, playback, now), { count: 2, expected: 2, state: 'aligned', spreadMs: 40, estimated: true, leader: 'A', offsets: { A: 0, B: 40 } });
   assert.equal(decoderTiming(players, playback, now + 25000).state, 'collecting');
   assert.equal(decoderTiming([{ member: true, status: null }, players[1]], playback, now).state, 'waiting');
   const paused = players.map((player) => ({ ...player, status: { ...player.status, state: 'paused' } }));
-  assert.deepEqual(decoderTiming(paused, { ...playback, state: 'paused' }, now), { count: 2, expected: 2, state: 'different', spreadMs: 1540, estimated: false });
+  assert.deepEqual(decoderTiming(paused, { ...playback, state: 'paused' }, now), { count: 2, expected: 2, state: 'different', spreadMs: 1540, estimated: false, leader: 'A', offsets: { A: 0, B: 1540 } });
 });
 
 test('accepts a display title for an imported presentation', () => {

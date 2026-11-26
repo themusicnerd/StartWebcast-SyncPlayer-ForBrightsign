@@ -123,6 +123,17 @@ Sub Main()
     recovery.settings.intent = "auto"
     recovery.role = "follower"
     Check(not CanRetryVideo(recovery), "follower does not create a private restart")
+    live = {role: "follower", source: "built-in", localOverride: false, settings: {intent: "auto", loop: false, selection: {kind: "web", url: "https://example.test/base"}}}
+    RestoreSelection(live)
+    Check(live.source = "web" And live.localOverride And live.url = "https://example.test/base", "restore the local webpage on follower boot")
+    Check(CanRetryVideo(live), "retry an unavailable local source even with MP4 looping off")
+    live.settings.selection = {kind: "srt", url: "srt://0.0.0.0:9000?mode=listener"}
+    RestoreSelection(live)
+    Check(live.source = "srt" And live.name = "SRT Feed", "restore the saved SRT listener")
+    live.source = "built-in"
+    live.settings.selection = {kind: "web", url: "file:///invalid"}
+    RestoreSelection(live)
+    Check(live.source = "built-in", "reject a malformed saved webpage")
     jump = ParseGroupJump("suite-jump-base-45000-7")
     Check(jump.clip = "base" And jump.position = 45000, "group jump identifies the clip and offset")
     Check(ParseGroupJump("suite-jump-base-0045000-7") = invalid, "reject ambiguous group jump positions")

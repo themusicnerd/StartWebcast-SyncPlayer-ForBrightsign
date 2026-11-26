@@ -208,6 +208,10 @@ function renderStatus() {
     $('#layout-overlay').hidden = $('#overlay-key').hidden = !native.overlay || native.state === 'blackout';
     $('#clear-overlay').disabled = !native.overlay;
     $('#source-built-in').disabled = native.role === 'follower';
+    $('#follow-group').hidden = !native.localoverride;
+    const startup = labels[native.startupsource];
+    $('#startup-source').hidden = !startup;
+    if (startup) $('#startup-source').textContent = `On Startup · ${startup}`;
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
@@ -252,6 +256,11 @@ function renderStatus() {
     const link = item('a', player.ip);
     link.href = `https://${player.ip}:8080/`;
     card.append(top, link, item('p', info ? `${labels[info.role]} · ${info.output}` : player.lastSeen ? `Last seen ${dateFormat.format(new Date(player.lastSeen))}` : 'Waiting for this player'));
+    const offset = timing?.offsets?.[player.id];
+    if (Number.isFinite(offset)) {
+      const position = player.id === timing.leader ? 'Timing Reference' : offset === 0 ? 'Matches Leader' : `${Math.abs(offset)} ms ${offset > 0 ? 'Ahead' : 'Behind'}`;
+      card.append(item('p', position));
+    } else if (info?.state) card.append(item('p', states[info.state] || info.state));
     if (player.problem) card.append(item('p', player.problem));
     else if (player.ready) card.append(item('p', `Verified ${player.ready.slice(0, 8)}`));
     return card;
@@ -352,7 +361,7 @@ async function refreshLibrary() {
 }
 
 async function command(name, data = {}) {
-  const updates = { play: 'Playback request accepted.', pause: 'Pause accepted.', resume: 'Resume accepted.', stop: 'Playback stopped.', restart: 'Restart requested.', loop: 'Loop preference updated.', blackout: 'Blackout applied.', source: 'Source requested. Check Playback for the load result.', distribute: data.clear ? 'Distribution cleared.' : 'Distribution queued.' };
+  const updates = { play: 'Playback request accepted.', pause: 'Pause accepted.', resume: 'Resume accepted.', stop: 'Playback stopped.', restart: 'Restart requested.', loop: 'Loop preference updated.', blackout: 'Blackout applied.', source: 'Source requested. Check Playback for the load result.', follow: 'Following the configured group.', distribute: data.clear ? 'Distribution cleared.' : 'Distribution queued.' };
   await operate(() => api(name, 'POST', data), updates[name]);
   await Promise.all([refresh(), refreshPlayback()]);
 }
@@ -471,6 +480,7 @@ function showSourceInput() {
 sourceFields.type.addEventListener('change', showSourceInput);
 showSourceInput();
 $('#source-built-in').addEventListener('click', () => command('play', { id: 'presentation' }));
+$('#follow-group').addEventListener('click', () => command('follow'));
 form('#window-form', (fields, element) => saveSettings(element, { rect: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, Number(fields[key].value)])) }));
 form('#overlay-form', (fields, element) => saveSettings(element, { overlay: fields.url.value.trim() }));
 $('#clear-overlay').addEventListener('click', () => {

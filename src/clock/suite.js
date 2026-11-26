@@ -33,7 +33,10 @@ function decoderTiming(players, playback, now = performance.now()) {
   });
   if (positions.some((position) => !Number.isFinite(position))) return { ...summary, state: 'collecting' };
   const spreadMs = Math.round(Math.max(...positions) - Math.min(...positions));
-  return { ...summary, state: spreadMs <= 120 ? 'aligned' : 'different', spreadMs, estimated: playback.state === 'playing' };
+  const reference = Math.max(0, included.findIndex(({ connection }) => connection === 'local'));
+  const offsets = Object.fromEntries(included.map(({ id }, index) => [id, Math.round(positions[index] - positions[reference])]));
+  return { ...summary, state: spreadMs <= 120 ? 'aligned' : 'different', spreadMs, estimated: playback.state === 'playing',
+    leader: included[reference].id, offsets };
 }
 
 function networkTimeServer(value) {
@@ -314,8 +317,12 @@ class Suite {
   snapshot() {
     const native = this.status;
     const active = this.activeMembers();
+    const leaderReport = native?.role === 'follower' ? this.follower.groupReport() : null;
+    const reportedPlayers = new Map((leaderReport?.players || []).map((player) => [player.id, player]));
     const players = this.members.map((id) => {
       if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true };
+      const mirrored = reportedPlayers.get(id);
+      if (mirrored) return { ...mirrored, ip: this.addresses[id], manageable: false };
       const peer = this.peers.get(id);
       const recent = peer && performance.now() - peer.seen < onlineMs;
       const command = this.library.state.audioCommands?.[id];
@@ -459,7 +466,7 @@ class Suite {
         return this.lighting.slot(slot, id, revision);
       }));
     }
-    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|distribute|display-power)$/.exec(path);
+    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|follow|distribute|display-power)$/.exec(path);
     if (command && request.method === 'POST') {
       const action = command[1];
       return json(response, 200, await this.update(request, async () => {
@@ -543,9 +550,20 @@ class Suite {
       const matches = native.domain === this.status.domain && native.group === this.status.group;
       const admitted = matches && this.activeMembers().includes(player);
       const audio = admitted && this.library.state.audioCommands?.[player];
+      let group;
+      if (admitted) {
+        const snapshot = this.snapshot();
+        group = { timing: snapshot.timing, seekable: this.playbackStatus()?.groupSeekable === true,
+          players: snapshot.players.map(({ id, member, connection, status }) => ({
+            id, member, connection: connection === 'local' ? 'online' : connection,
+            status: status ? { role: String(status.role || '').slice(0, 12), output: String(status.output || '').slice(0, 24),
+              state: String(status.state || '').slice(0, 24), domain: Number.isInteger(status.domain) ? status.domain : null,
+              audioenabled: status.audioenabled === true, muted: status.muted === true, volume: Number.isInteger(status.volume) ? status.volume : null } : null,
+          })) };
+      }
       return json(response, 200, { admitted, wake: admitted ? this.status.scheduledwake : undefined,
         audio: audio && audio.revision !== native.audiorevision ? audio : undefined,
-        group: admitted ? { timing: this.snapshot().timing, seekable: this.playbackStatus()?.groupSeekable === true } : undefined,
+        group,
         assignment: admitted ? this.library.assignment(player) : null });
     }
     if (match[2] === 'seek' && request.method === 'POST') {

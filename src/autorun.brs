@@ -268,6 +268,8 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     settings.ntp = network.GetTimeServer()
     settings.interval = network.GetTimeServerIntervalSeconds()
     panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: settings.presentationtitle, source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
+    panel.localOverride = false
+    panel.groupCue = invalid
     RestoreSelection(panel)
     panel.waiting = panel.role = "leader" And panel.source = "group" And panel.settings.intent = "auto"
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
@@ -297,6 +299,7 @@ Function PanelStatus(panel As Object) As Object
     data.audioenabled = panel.settings.audioenabled
     data.audiorevision = panel.settings.audiorevision
     data.presentationtitle = panel.settings.presentationtitle
+    data.localoverride = panel.localOverride
     If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
     data.cecrequest = panel.cecRequest
@@ -312,7 +315,10 @@ Function PanelStatus(panel As Object) As Object
     For Each key In playback
         data[key] = playback[key]
     End For
-    If Type(panel.settings.selection) = "roAssociativeArray" Then data.savedasset = panel.settings.selection.asset
+    If Type(panel.settings.selection) = "roAssociativeArray" Then
+        data.savedasset = panel.settings.selection.asset
+        data.startupsource = panel.settings.selection.kind
+    End If
     If panel.clock <> invalid Then
         data.clockvalid = panel.clock.IsValid()
         If panel.scheduled Then
@@ -441,6 +447,11 @@ End Function
 Sub RestoreSelection(panel As Object)
     selected = panel.settings.selection
     If Type(selected) <> "roAssociativeArray" Then Return
+    If (selected.kind = "web" And PanelWebUrl(selected.url)) Or (selected.kind = "srt" And PanelSrtUrl(selected.url)) Then
+        SetLiveSource(panel, selected.kind, selected.url)
+        panel.localOverride = panel.role = "follower"
+        Return
+    End If
     If selected.kind <> "group" And selected.kind <> "local" Then Return
     If selected.kind = "group" And not SafeHex(selected.revision, 24) Then Return
     If selected.kind = "local" And panel.role <> "standalone" Then Return
@@ -481,6 +492,36 @@ Function PanelWebUrl(value As Dynamic) As Boolean
     If not TextValue(value) Then Return false
     Return Len(value) <= 1024 And (Left(value, 7) = "http://" Or Left(value, 8) = "https://")
 End Function
+
+Function PanelSrtUrl(value As Dynamic) As Boolean
+    If not TextValue(value) Then Return false
+    Return Len(value) <= 1024 And Left(value, 6) = "srt://"
+End Function
+
+Function PanelLiveSource(panel As Object) As Boolean
+    Return panel.source = "web" Or panel.source = "srt"
+End Function
+
+Sub SetLiveSource(panel As Object, kind As String, url As String)
+    panel.source = kind
+    panel.name = "Webpage"
+    If kind = "srt" Then panel.name = "SRT Feed"
+    panel.asset = ""
+    panel.revision = ""
+    panel.url = url
+End Sub
+
+Sub RememberLiveSource(panel As Object)
+    previous = panel.settings.selection
+    If Type(previous) = "roAssociativeArray" Then
+        If previous.kind = panel.source And previous.url = panel.url Then Return
+    End If
+    panel.settings.selection = {kind: panel.source, url: panel.url}
+    If not SavePanel(panel, panel.settings) Then
+        panel.settings.selection = previous
+        panel.error = "The Live Source Started but Its Startup Selection Could Not Be Saved."
+    End If
+End Sub
 
 Function HtmlLayer(url As String, bounds As Object, port As Object, rotation As Integer) As Dynamic
     options = {url: url, port: port, nodejs_enabled: false, brightsign_js_objects_enabled: false, security_params: {websecurity: true, insecure_https_enabled: false}, pcm_audio_outputs: []}
@@ -560,11 +601,14 @@ Sub PanelHtmlFeedback(panel As Object)
             If data <> invalid Then
                 If data.reason = "load-finished" Then
                     panel.state = "playing"
+                    panel.retryAt = 0
+                    panel.retryDelay = 3
                     If panel.settings.overlay <> "" Then panel.overlayState = "loaded"
                 End If
                 If data.reason = "load-error" Then
                     panel.state = "error"
                     panel.error = "The lower webpage could not load."
+                    ScheduleVideoRetry(panel)
                 End If
             End If
         End If
@@ -624,12 +668,15 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
         ScheduleVideoRetry(panel)
         Return false
     End If
+    If PanelLiveSource(panel) Then RememberLiveSource(panel)
     If panel.source <> "web" Then RefreshOverlay(panel)
     Return true
 End Function
 
 Function CanRetryVideo(panel As Object) As Boolean
-    Return panel.role <> "follower" And panel.settings.intent = "auto" And panel.settings.loop And panel.source <> "web" And panel.source <> "srt"
+    If panel.settings.intent <> "auto" Then Return false
+    If PanelLiveSource(panel) Then Return true
+    Return panel.role <> "follower" And panel.settings.loop
 End Function
 
 Sub ScheduleVideoRetry(panel As Object)
@@ -668,7 +715,8 @@ Sub PanelTick(panel As Object)
         panel.error = "The source did not report playback within 20 seconds."
         ScheduleVideoRetry(panel)
     End If
-    If panel.role = "follower" Or UpTime(0) < panel.readyAt Then Return
+    If UpTime(0) < panel.readyAt Then Return
+    If panel.role = "follower" And not panel.localOverride Then Return
     If panel.retryAt > 0 And now >= panel.retryAt Then
         panel.retryAt = 0
         If CanRetryVideo(panel) Then
@@ -677,17 +725,20 @@ Sub PanelTick(panel As Object)
             StartPanel(panel)
         End If
     End If
-    wake = invalid
-    If panel.scheduled And panel.settings.scheduleenabled = true And panel.clock <> invalid Then
-        If panel.clock.IsValid() Then wake = ScheduleAllows(panel.clock, panel.settings)
+    If panel.role <> "follower" Then
+        wake = invalid
+        If panel.scheduled And panel.settings.scheduleenabled = true And panel.clock <> invalid Then
+            If panel.clock.IsValid() Then wake = ScheduleAllows(panel.clock, panel.settings)
+        End If
+        ApplyScheduledPower(panel, wake)
     End If
-    ApplyScheduledPower(panel, wake)
     If not panel.autostart Then
         panel.autostart = true
         If panel.settings.intent = "auto" Then
             If panel.waiting Then
                 panel.state = "waiting for peers"
             Else
+                If PanelLiveSource(panel) Then PanelSignal(panel, "suite-stop-")
                 StartPanel(panel)
             End If
         Else
@@ -700,6 +751,13 @@ Sub PanelFollow(panel As Object, event As Object)
     syncId = event.GetId()
     stamp = event.GetIsoTimestamp()
     If event.GetDomain() <> panel.settings.group Or Len(syncId) > 64 Or Len(stamp) = 0 Or Len(stamp) > 64 Then Return
+    basePrefix = panel.baselinePrefix + "-" + panel.nativeLoop + "-"
+    If Left(syncId, Len(basePrefix)) = basePrefix Or Left(syncId, 11) = "suite-play-" Or ParseGroupJump(syncId) <> invalid Then
+        panel.groupCue = event
+    Else If Left(syncId, 6) = "suite-" Then
+        panel.groupCue = invalid
+    End If
+    If panel.localOverride Then Return
     If panel.scheduled And UpTime(0) >= panel.memberUntil Then Return
     If syncId = panel.syncId And stamp = panel.syncTime Then Return
     panel.syncId = syncId
@@ -777,6 +835,7 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
     If panel.source = "srt" Then
         panel.state = "ended"
         panel.error = "The SRT stream ended or disconnected."
+        ScheduleVideoRetry(panel)
     Else If panel.nativeLoop = "seamless" Then
         StopPanel(panel, false)
         LogEvent("SEAMLESS_MEDIA_ENDED", {})
@@ -863,7 +922,9 @@ Function PanelSet(panel As Object, patch As Object) As String
     End If
     old = panel.settings
     If nextSettings.role <> old.role Or nextSettings.domain <> old.domain Or nextSettings.group <> old.group Or nextSettings.leader <> old.leader Then
-        nextSettings.selection = {kind: "built-in"}
+        kind = ""
+        If Type(nextSettings.selection) = "roAssociativeArray" Then kind = nextSettings.selection.kind
+        If kind <> "srt" And kind <> "web" Then nextSettings.selection = {kind: "built-in"}
         change = "role-or-ptp"
     Else If nextSettings.rotation <> old.rotation Then
         change = "orientation"
@@ -939,6 +1000,23 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If body.wake Then panel.cecRequest = "on"
         Return ""
     End If
+    If action = "follow" Then
+        If panel.role <> "follower" Or not panel.localOverride Then Return "This Player Is Already Following Its Group."
+        saved = ParseJson(FormatJson(panel.settings))
+        saved.selection = {kind: "built-in"}
+        saved.intent = "auto"
+        If not SavePanel(panel, saved) Then Return "The startup selection could not be saved."
+        StopPanel(panel, false)
+        panel.settings = saved
+        panel.localOverride = false
+        panel.source = "built-in"
+        panel.name = saved.presentationtitle
+        panel.url = ""
+        panel.syncId = ""
+        panel.syncTime = ""
+        If panel.groupCue <> invalid Then PanelFollow(panel, panel.groupCue)
+        Return ""
+    End If
     If action = "pause" Or action = "resume" Then
         playback = PanelPlayback(panel)
         If not playback.pausable Then Return "Play an MP4 to use this transport control."
@@ -1002,18 +1080,13 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         panel.waiting = false
         If body.type = "web" And not PanelWebUrl(body.url) Then Return "Invalid webpage URL."
         If body.type = "srt" Then
-            If not TextValue(body.url) Then Return "Invalid SRT URL."
-            If Len(body.url) > 1024 Or Left(body.url, 6) <> "srt://" Then Return "Invalid SRT URL."
+            If not PanelSrtUrl(body.url) Then Return "Invalid SRT URL."
         Else If body.type <> "web" Then
             Return "Unsupported source."
         End If
         PanelSignal(panel, "suite-stop-")
-        panel.source = body.type
-        panel.name = "Webpage"
-        If body.type = "srt" Then panel.name = "SRT stream"
-        panel.asset = ""
-        panel.revision = ""
-        panel.url = body.url
+        SetLiveSource(panel, body.type, body.url)
+        panel.localOverride = panel.role = "follower"
     Else If action = "play" Then
         If panel.role = "follower" Then Return "The configured leader controls group playback."
         If body.type <> "built-in" And body.type <> "built-in-local" And body.type <> "group" And body.type <> "preview" And body.type <> "local" Then Return "Unsupported source."

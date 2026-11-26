@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.14
+
+- Restore SRT feeds and webpages on boot. Retry an unavailable live source with backoff.
+- Let a follower return from its local live source with Follow Group.
+- Place Sources & Layers before Media Library and show the upper controls above the base controls.
+- Show the leader's group status and each player's estimated position difference on every console.
+
 ## 0.2.13
 
 - List the imported SD card presentation in Media Library and show its title during playback.

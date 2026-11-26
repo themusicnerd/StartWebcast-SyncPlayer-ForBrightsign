@@ -10,7 +10,9 @@ The top bar shows HDMI-reported TV power. **Power On** and **Standby** send loca
 
 **Media Library** lists the presentation already on the SD card and any media you upload. The generated **Sync Test** clips include a frame counter and a short tone for each second. [Sync Test Clips](../test-content)
 
-At startup the player restores the last saved MP4 selection and starts it from the beginning. Stop and Blackout are saved startup states. Local previews, SRT feeds and webpages apply to the current session. A group library selection waits for the matching media on its followers.
+At startup the player restores the last saved source. MP4s start at the beginning. A saved SRT feed or webpage opens on the player that selected it. The player retries an unavailable live source. Stop and Blackout are saved startup states. Local previews apply to the current session. A group library selection waits for the matching media on its followers.
+
+Select **Follow Group** to return a follower from its local live source to group playback. The follower joins the latest active group cue when available.
 
 Set **Output Rotation** in **HDMI & Audio**. Select 0°, 90°, 180° or 270° clockwise for each player. Save the setting to restart that player. The video and graphics layers rotate together, and the layout window follows the rotated coordinates. [Video Rotation API](https://docs.brightsign.biz/develop/rovideoplayer) · [HTML Widget Rotation](https://docs.brightsign.biz/develop/rohtmlwidget)
 
@@ -93,11 +95,12 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `PUT /group/audio/B` | Send `{"enabled":true}` or `{"enabled":false}` on the leader to select HDMI audio for Player B |
 | `POST /snapshot` | Send `{}` to capture a 960 × 540 JPEG |
 | `GET /updates` | Read the running version, staged version and GitHub source |
+| `POST /follow` | Send `{}` to return a follower from its local live source to group playback |
 | `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` as the revision for a draft |
 
 `PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 
-The Players panel compares native decoder reports from the same playback cycle. During playback, the console estimates the position difference using the time each report arrived at the leader. During pause, it compares the stopped positions directly. Physical HDMI frame alignment requires an output measurement.
+The Players panel compares native decoder reports from the same playback cycle. During playback, the console estimates the position difference using the time each report arrived at the leader. During pause, it compares the stopped positions directly. All consoles show the same group reports and each player's difference from the leader. Physical HDMI frame alignment requires an output measurement.
 
 From a workstation, use the specific player's public `clock-cert.pem` for HTTPS verification. These examples prompt for the installation password.
 

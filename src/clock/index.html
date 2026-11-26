@@ -11,7 +11,7 @@
 <body>
   <header class="masthead">
     <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><img src="/startwebcast.png" alt="" width="38" height="27">StartWebcast SyncPlayer</a>
-    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#library">Media Library</a><a href="#sources">Sources &amp; Layers</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
+    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#sources">Sources &amp; Layers</a><a href="#library">Media Library</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
     <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button></div>
   </header>
   <main>
@@ -34,16 +34,6 @@
     </section>
 
     <div class="grid grid-halves work-grid">
-      <section class="panel section" id="library" aria-labelledby="library-title">
-        <div class="panel-heading"><h2 id="library-title">Media Library</h2><span id="library-count" class="muted"></span></div>
-        <form id="upload">
-          <label class="drop" id="drop" for="media-files"><strong>Drop MP4 Files or Choose Files</strong><span>Use names like Welcome_A.mp4, Welcome_B.mp4 and Welcome_C.mp4.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,.mp4"></label>
-          <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace Draft Files</label></div>
-          <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
-        </form>
-        <div class="library-list" id="items"><p class="muted">Presentation is available from Playback.</p></div>
-        <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear Distribution</button></div>
-      </section>
       <section class="panel section" id="sources" aria-labelledby="sources-title">
         <div class="panel-heading"><h2 id="sources-title">Sources &amp; Layers</h2></div>
         <figure class="layer-preview">
@@ -52,11 +42,19 @@
           <ul class="layer-key"><li class="base-key">Lower-Layer Window</li><li class="overlay-key" id="overlay-key" hidden>Full-Screen HTML5 Overlay</li></ul>
         </figure>
         <div class="layer-controls">
+          <section class="layer-control upper-layer" aria-labelledby="upper-layer-title">
+            <div class="layer-heading"><h3 id="upper-layer-title">Upper Layer <span>HTML5 Overlay</span></h3><span class="status-pill" id="overlay-state">Off</span></div>
+            <p>Place an HTML5 page above the base source. Use a transparent page background to show the base source through it.</p>
+            <form id="overlay-form" class="stack">
+              <div class="form-row"><label class="grow">Overlay URL<input type="url" name="url" spellcheck="false" placeholder="https://server/overlay.html"></label><button type="submit" class="secondary">Apply Overlay</button><button id="clear-overlay" class="secondary" type="button">Clear Overlay</button></div>
+            </form>
+          </section>
           <section class="layer-control base-layer" aria-labelledby="base-layer-title">
             <div class="layer-heading"><h3 id="base-layer-title">Lower Layer <span>Base Source</span></h3><span id="base-state" class="status-pill">Reading Source</span></div>
             <p id="base-source-name" class="muted"></p>
             <p>Play one source in this layer. Choose the card presentation, an MP4, an SRT feed, or a webpage.</p>
-            <div class="actions layer-actions"><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in Media Library</a></div>
+            <p class="muted" id="startup-source" hidden></p>
+            <div class="actions layer-actions"><button id="follow-group" type="button" class="secondary" hidden>Follow Group</button><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in Media Library</a></div>
             <form id="source-form" class="stack">
               <h4>Live or Web Source</h4>
               <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" aria-describedby="source-help" required></label><button type="submit">Play Source</button></div>
@@ -66,14 +64,17 @@
               <h4>Position and Size</h4><div class="form-row dimensions"><label>Left %<input type="number" name="x" min="0" max="95" required></label><label>Top %<input type="number" name="y" min="0" max="95" required></label><label>Width %<input type="number" name="width" min="5" max="100" required></label><label>Height %<input type="number" name="height" min="5" max="100" required></label><button type="submit" class="secondary">Apply Window</button></div>
             </form>
           </section>
-          <section class="layer-control upper-layer" aria-labelledby="upper-layer-title">
-            <div class="layer-heading"><h3 id="upper-layer-title">Upper Layer <span>HTML5 Overlay</span></h3><span class="status-pill" id="overlay-state">Off</span></div>
-            <p>Place an HTML5 page above the base source. Use a transparent page background to show the base source through it.</p>
-            <form id="overlay-form" class="stack">
-              <div class="form-row"><label class="grow">Overlay URL<input type="url" name="url" spellcheck="false" placeholder="https://server/overlay.html"></label><button type="submit" class="secondary">Apply Overlay</button><button id="clear-overlay" class="secondary" type="button">Clear Overlay</button></div>
-            </form>
-          </section>
         </div>
+      </section>
+      <section class="panel section" id="library" aria-labelledby="library-title">
+        <div class="panel-heading"><h2 id="library-title">Media Library</h2><span id="library-count" class="muted"></span></div>
+        <form id="upload">
+          <label class="drop" id="drop" for="media-files"><strong>Drop MP4 Files or Choose Files</strong><span>Use names like Welcome_A.mp4, Welcome_B.mp4 and Welcome_C.mp4.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,.mp4"></label>
+          <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace Draft Files</label></div>
+          <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
+        </form>
+        <div class="library-list" id="items"><p class="muted">Presentation is available from Playback.</p></div>
+        <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear Distribution</button></div>
       </section>
     </div>
 
@@ -162,6 +163,8 @@
             <li>Select <strong>Play Presentation</strong> or choose an MP4 from <strong>Media Library</strong>.</li>
             <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
             <li>Enter the URL. Select <strong>Play Source</strong>.</li>
+            <li>The player opens the last saved source at startup.</li>
+            <li>On a follower, select <strong>Follow Group</strong> to return to group playback.</li>
             <li>Set the window position and size. Select <strong>Apply Window</strong>.</li>
             <li>In <strong>Upper Layer</strong>, enter the HTML5 overlay URL.</li>
             <li>Select <strong>Apply Overlay</strong>.</li>
