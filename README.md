@@ -14,6 +14,8 @@ Use the same release ZIP on all three players. [SD quick start](docs/SD-QUICK-ST
 
 ## Prepared content cards
 
+For a clean installation, use the SD Install ZIP with the matching Player A, B or C folder. It includes the generated Sync Test clips and the public OTA verification key. Provision your own management credentials. [SD Install Guide](docs/SD-INSTALL.md) · [GitHub Releases](https://github.com/themusicnerd/StartWebcast-SyncPlayer-ForBrightsign/releases)
+
 Prepare dedicated A/B/C cards for a matched 4K25 set. Each card commissions its static IPv4 address, shows a startup identification screen and enables HDMI audio. The daily 07:00–21:00 Sydney schedule uses HDMI-CEC to control the displays. Each card can also commission password-protected BrightSign diagnostics at boot. [Content Card Guide](docs/CONTENT-CARDS.md)
 
 Provisioned cards host the full-width purple management console on HTTPS port 8080. The [operator and API guide](docs/SUITE.md) covers uploads, the library, monitoring, HDMI/audio, clock and NTP, Standalone mode, group PTP settings, source layers and sACN/Art-Net controls.

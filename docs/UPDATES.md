@@ -10,7 +10,7 @@ Install version 0.2.5 or later on the SD card to enable app updates. The card ne
 4. Check the staged version and select **Install and Restart**. The console and playback will be briefly unavailable on that player. Verify that the running version changed before moving to the next player.
 5. Select **Roll Back and Restart** to go back to the previous version. If the new slot fails its startup check, the player attempts to boot the previous healthy version.
 
-The default GitHub source is `themusicnerd/StartWebcast-SyncPlayer-ForBrightsign` on `main`. The updater looks for `updates/StartWebcast-SyncPlayer.swu` on the selected branch. Each player stores its own source settings. To use a different signing key, provision its public key on the card before installing packages signed with it.
+The default GitHub source is `themusicnerd/StartWebcast-SyncPlayer-ForBrightsign` on `main`. Leave the token field blank for this public source. The updater looks for `updates/StartWebcast-SyncPlayer.swu` on the selected branch. Each player stores its own source settings. To use a different signing key, provision its public key on the card before installing packages signed with it.
 
 ## Build and Publish a Package
 

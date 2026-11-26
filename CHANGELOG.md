@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.20
+
+- Show the player name in the browser tab.
+- Give IDENT and Test Pattern distinct colours and show green while the overlay is active.
+- Add a complete SD-card release with generated test media and a public OTA release.
+
 ## 0.2.19
 
 - Show SD presentation metadata by player. Add group play, local preview and reversible removal of the library entry.

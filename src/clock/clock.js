@@ -269,6 +269,7 @@ function renderStatus() {
   $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native Player Starting';
   $('#connection').dataset.state = 'online';
   if (native) {
+    document.title = `SyncPlayer | Player ${native.playerid}`;
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
     $('#firmware-version').textContent = `Installed Version ${native.firmware}`;
     $('#ident').disabled = $('#test-pattern').disabled = native.state === 'booting';

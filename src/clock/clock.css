@@ -97,6 +97,9 @@ button { color: #1b1029; background: #bd99fc; border: 1px solid transparent; bor
 button:hover { filter: brightness(1.13); }
 button:disabled { opacity: .45; cursor: default; }
 button.secondary { background: #352451; border-color: #6c4a97; color: #f5e9ff; }
+#ident { background: #573317; border-color: #cc864d; color: #fff0e0; }
+#test-pattern { background: #213d68; border-color: #658ad1; color: #edf4ff; }
+#ident[aria-pressed="true"], #test-pattern[aria-pressed="true"] { background: #127344; border-color: #72d7a1; color: #fff; }
 button.danger { color: #ffd0e0; border-color: #7b4564; background: #432539; }
 :focus-visible { outline: 2px solid #ffb87e; outline-offset: 3px; }
 .drop { padding: 20px; border: 1px dashed #8c64c1; background: #2c1e42; border-radius: 8px; cursor: pointer; }
