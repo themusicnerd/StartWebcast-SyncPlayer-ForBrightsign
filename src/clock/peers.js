@@ -124,17 +124,18 @@ class Follower {
     return Buffer.concat(chunks, length);
   }
 
-  async pulse(status) {
+  async pulse(status, presentation) {
     if (this.busy || !status?.leader || performance.now() < this.nextAttempt) return;
     const node = this.leaderNode(status.leader);
     if (!node) return;
     this.busy = true;
     const base = `/peer/v1/players/${status.playerid}`;
     try {
-      const response = await connect(node, `${base}/heartbeat`, 'POST', { status, ready: this.ready, problem: this.problem });
+      const response = await connect(node, `${base}/heartbeat`, 'POST', { status, ready: this.ready, problem: this.problem, presentation });
       const reply = await replyJson(response);
       const admitted = reply.admitted !== false;
       if (!admitted) this.ready = '';
+      this.assignment = admitted ? reply.assignment : null;
       this.group = admitted ? reply.group : null;
       this.groupSeen = performance.now();
       await this.native('membership', { admitted, wake: typeof reply.wake === 'boolean' ? reply.wake : undefined });

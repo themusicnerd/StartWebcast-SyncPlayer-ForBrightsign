@@ -10,6 +10,7 @@ const { pipeline } = require('node:stream/promises');
 const { Library, RequestError, assetPath, availableBytes, digestPattern, idPattern } = require('./library');
 const { Follower, watchPtp } = require('./peers');
 const { Lighting } = require('./dmx');
+const { inspectMp4 } = require('./mp4');
 
 const outputModes = ['3840x2160x50p', '1920x1080x50p'];
 const onlineMs = 16000;
@@ -18,6 +19,18 @@ const previewInterval = 24000;
 const previewLifetime = 90000;
 const liveSourceTypes = ['srt', 'rtsp', 'web'];
 const maxThumbBytes = 32 * 1024;
+
+function cardMetadata(value) {
+  if (!value || typeof value.present !== 'boolean') return null;
+  if (!value.present) return { present: false };
+  const bytes = Number.isSafeInteger(value.bytes) && value.bytes > 0 ? value.bytes : null;
+  const { width, height, rate, codec } = value.video || {};
+  const video = [width, height].every((size) => Number.isInteger(size) && size > 0 && size <= 7680) &&
+    Number.isFinite(rate) && rate > 0 && rate <= 120 && ['AVC', 'H.264', 'H.265', 'HEVC'].includes(codec) ? { width, height, rate, codec } : null;
+  const seconds = Number.isFinite(value.seconds) && value.seconds > 0 && value.seconds < 86400 ? value.seconds : null;
+  const audio = value.audio === 'AAC-LC' ? value.audio : null;
+  return { present: true, bytes, video, audio, seconds };
+}
 
 function playerLayout(input, members) {
   const { rows, columns, cells } = input || {};
@@ -219,6 +232,7 @@ class Suite {
     this.problem = '';
     this.previews = new Map();
     this.metrics = {};
+    this.cardMedia = null;
     this.exchange = exchange;
     this.library = new Library(root, this.members, async (asset) => (await this.call('probe', { asset })).ok === 'yes');
     this.follower = new Follower(root, host, this.addresses, exchange, (action, body) => this.call(action, body), () => this.captureJpeg('thumbnail'));
@@ -241,6 +255,87 @@ class Suite {
     try { await this.library.init(); } catch { this.problem = 'The media index or storage could not be opened.'; }
     this.applyRoster();
     await this.lighting.init();
+    void this.inspectCardPresentation();
+  }
+
+  async inspectCardPresentation() {
+    if (!/^[A-Z]$/.test(this.id)) return;
+    const file = join(this.library.root, '..', 'media', `Presentation_${this.id}.mp4`);
+    try {
+      const entry = await io.lstat(file);
+      if (!entry.isFile()) { this.cardMedia = { present: false }; return; }
+      const metadata = await inspectMp4(file).catch(() => null);
+      this.cardMedia = cardMetadata({ present: true, bytes: entry.size, video: metadata?.video, audio: metadata?.audio?.codec, seconds: metadata?.seconds });
+    } catch { this.cardMedia = { present: false }; }
+  }
+
+  cardPresentation() {
+    const follower = this.status?.role === 'follower';
+    const group = follower ? this.follower.groupReport()?.presentation : null;
+    if (group) {
+      return { ...group, clips: group.clips.map((clip) => clip.id === this.id ? { ...clip, media: this.cardMedia || clip.media } : clip) };
+    }
+    const standalone = this.status?.role === 'standalone';
+    const members = standalone ? [this.id] : this.members;
+    return {
+      id: 'presentation', name: this.status?.presentationtitle || 'Presentation', card: true, draft: [], revisions: [],
+      hidden: this.library.state.presentationHidden === true, clips: members.map((id) => {
+        const peer = this.peers.get(id);
+        const media = id === this.id ? this.cardMedia : peer && performance.now() - peer.seen < onlineMs ? peer.presentation : null;
+        return { id, media };
+      }),
+    };
+  }
+
+  async cardAction(task) {
+    if (this.status?.role === 'follower') {
+      try { return await this.follower.request(this.status, 'presentation', { task }); }
+      catch { throw new RequestError(409, 'The Leader Could Not Apply the Presentation Request.'); }
+    }
+    if (!this.status) throw new RequestError(503, 'The Native Player Is Still Starting.');
+    if (task === 'play') {
+      if (this.cardPresentation().hidden) throw new RequestError(409, 'Restore the SD Presentation in the Media Library First.');
+      if (this.cardMedia?.present === false) throw new RequestError(409, 'The SD Presentation File Is Unavailable.');
+      const missing = this.cardPresentation().clips.filter(({ id, media }) => media?.present === false && this.activeMembers().includes(id));
+      if (missing.length) throw new RequestError(409, `Missing SD Presentation File on ${missing.map(({ id }) => `Player ${id}`).join(', ')}.`);
+      return this.call('play', { type: 'built-in' });
+    }
+    const cardSource = new Set(['built-in', 'built-in-local']);
+    const usingCard = (status) => cardSource.has(status?.source) && ['playing', 'starting', 'paused'].includes(status.state);
+    if (task === 'hide' && (cardSource.has(this.status.startupsource) || this.status.streamfallback?.id === 'presentation' ||
+        usingCard(this.status) || [...this.peers.values()].some((peer) => performance.now() - peer.seen < onlineMs &&
+          (usingCard(peer.status) || peer.status?.streamfallback?.id === 'presentation')))) {
+      throw new RequestError(409, 'Select Another Playback Source Before Deleting This Library Entry.');
+    }
+    await this.library.transaction((next) => { next.presentationHidden = task === 'hide'; });
+    return { ok: true, hidden: task === 'hide' };
+  }
+
+  streamFallbacks() {
+    const items = [];
+    const card = this.cardPresentation();
+    if (!card.hidden && this.cardMedia?.present) items.push({ id: 'presentation', name: card.name, asset: '' });
+    if (this.status?.role === 'follower') {
+      const assignment = this.follower.assignment;
+      if (assignment?.revision === this.follower.ready && digestPattern.test(assignment?.digest)) {
+        items.push({ id: assignment.revision, name: assignment.name || 'Distributed Media', asset: assignment.digest });
+      }
+      return items;
+    }
+    for (const { id, name, draft, revisions } of Object.values(this.library.state.sets)) {
+      if (draft[this.id]) items.push({ id: `${id}/draft`, name: `${name} · Draft`, asset: draft[this.id].digest });
+      for (const version of revisions) {
+        if (version.files[this.id]) items.push({ id: `${id}/${version.revision}`, name: `${name} · ${version.revision.slice(0, 8)}`, asset: version.files[this.id].digest });
+      }
+    }
+    return items;
+  }
+
+  streamRecovery() {
+    const configured = this.status?.streamfallback;
+    const options = this.streamFallbacks().map(({ id, name }) => ({ id, name }));
+    if (configured?.id && !options.some(({ id }) => id === configured.id)) options.push({ id: configured.id, name: configured.name });
+    return { fallback: configured?.id || '', options };
   }
 
   async readMetrics() {
@@ -440,7 +535,7 @@ class Suite {
   async refresh() {
     try { await this.call('status'); } catch { /* Commands remain available while startup completes. */ }
     try { this.storage = await availableBytes(this.library.root); } catch { this.storage = null; }
-    if (this.status?.role === 'follower') void this.follower.pulse(this.status);
+    if (this.status?.role === 'follower') void this.follower.pulse(this.status, this.cardMedia);
     if (this.status?.role === 'leader' && this.status.waiting) {
       const pending = this.unready(this.status.revision);
       if (!pending.length && this.library.assignment(this.id, this.status.revision)) {
@@ -484,7 +579,7 @@ class Suite {
     });
     const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
       decoderTiming(reports, localPlayback);
-    return { native, players, layout: this.layout(), storage: this.storage, problem: this.problem, ptp,
+    return { native, players, layout: this.layout(), presentation: this.cardPresentation(), recovery: this.streamRecovery(), storage: this.storage, problem: this.problem, ptp,
       dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot(), metrics: this.metrics };
   }
 
@@ -570,11 +665,12 @@ class Suite {
     }
     if (request.method === 'GET') {
       if (path === '/api/v1/sources') return json(response, 200, this.savedSources());
+      if (path === '/api/v1/stream-recovery') return json(response, 200, this.streamRecovery());
       if (path === '/api/v1/status') return json(response, 200, this.snapshot());
       if (path === '/api/v1/playback') return json(response, 200, this.playbackStatus());
       if (path === '/api/v1/players') return json(response, 200, this.snapshot().players);
       if (path === '/api/v1/content') return json(response, 200, [
-        { id: 'presentation', name: this.status?.presentationtitle || 'Presentation', card: true, draft: [], revisions: [] },
+        ...[this.cardPresentation()].filter(({ hidden }) => !hidden),
         ...this.library.list(),
       ]);
       if (path === '/api/v1/settings') return json(response, 200, { native: this.status, outputModes });
@@ -582,10 +678,29 @@ class Suite {
       if (path === '/api/v1/lighting') return json(response, 200, this.lighting.snapshot());
       if (path === '/api/v1/jobs/distribution') return json(response, 200, { dispatch: this.library.state.dispatch, players: this.snapshot().players });
     }
+    if (path === '/api/v1/stream-recovery' && request.method === 'PUT') {
+      return json(response, 200, await this.update(request, async () => {
+        const { fallback } = await readJson(request);
+        const item = fallback === '' ? { id: '', asset: '', name: '' } : this.streamFallbacks().find(({ id }) => id === fallback);
+        if (!item) throw new RequestError(400, 'Choose a Library Clip Available on This Player.');
+        await this.call('settings', { streamfallback: item });
+        return this.streamRecovery();
+      }));
+    }
+    if (path === '/api/v1/content/presentation' && ['DELETE', 'PUT'].includes(request.method)) {
+      return json(response, 200, await this.update(request, async () => {
+        const { confirm } = await readJson(request);
+        if (confirm !== true) throw new RequestError(400, 'Confirm the Library Change.');
+        return this.cardAction(request.method === 'DELETE' ? 'hide' : 'restore');
+      }));
+    }
     if (path === '/api/v1/sources' && request.method === 'POST') {
-      return json(response, 201, await this.update(request, async () => this.addSource(await readJson(request))));
+      return json(response, 201, await this.update(request, async () => this.saveSource(await readJson(request))));
     }
     const source = /^\/api\/v1\/sources\/([a-f0-9]{24})$/.exec(path);
+    if (source && request.method === 'PUT') {
+      return json(response, 200, await this.update(request, async () => this.saveSource(await readJson(request), source[1])));
+    }
     if (source && request.method === 'DELETE') {
       return json(response, 200, await this.update(request, async () => {
         await readJson(request);
@@ -616,7 +731,7 @@ class Suite {
       const input = await readJson(request);
       if (input.confirm !== true) throw new RequestError(400, 'Confirm deletion.');
       return json(response, 200, await this.update(request, async () => {
-        const active = [this.status?.asset, this.status?.savedasset].filter(Boolean);
+        const active = [this.status?.asset, this.status?.savedasset, this.status?.streamfallback?.asset].filter(Boolean);
         const removed = await this.library.remove(remove[1], remove[2], active, this.status?.revision);
         await this.library.reap(removed).catch(() => {});
         this.note('Removed media from the library');
@@ -647,7 +762,7 @@ class Suite {
         return this.lighting.slot(slot, id, revision);
       }));
     }
-    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|follow|distribute|display-power|ident)$/.exec(path);
+    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|retry-stream|follow|distribute|display-power|ident)$/.exec(path);
     if (command && request.method === 'POST') {
       const action = command[1];
       return json(response, 200, await this.update(request, async () => {
@@ -662,9 +777,14 @@ class Suite {
 
   async command(action, body) {
     if (action === 'ident') {
-      const seconds = body.seconds ?? 10;
-      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 30) throw new RequestError(400, 'Enter an IDENT Duration Between 0 and 30 Seconds.');
-      return this.call(action, { seconds });
+      const mode = body.mode ?? 'details';
+      if (!['details', 'test-pattern'].includes(mode)) throw new RequestError(400, 'Choose IDENT or Test Pattern.');
+      const limit = mode === 'details' ? 30 : 600;
+      if (body.seconds !== undefined && (!Number.isInteger(body.seconds) || body.seconds < 0 || body.seconds > limit)) {
+        throw new RequestError(400, `Enter a Duration Between 0 and ${limit} Seconds.`);
+      }
+      const seconds = body.seconds ?? (mode === 'details' ? 10 : -1);
+      return this.call(action, { mode, seconds });
     }
     if (action === 'display-power') {
       if (!['on', 'standby'].includes(body.power)) throw new RequestError(400, 'Choose Power On or Standby.');
@@ -706,7 +826,11 @@ class Suite {
       return this.call(action, { type: body.type, url: sourceUrl(body.url, body.type), name });
     }
     if (action === 'play') {
-      if (body.id === 'presentation') return this.call(action, { type: body.preview === true ? 'built-in-local' : 'built-in' });
+      if (body.id === 'presentation') {
+        if (body.preview !== true) return this.cardAction('play');
+        if (this.cardPresentation().hidden || this.cardMedia?.present === false) throw new RequestError(409, 'The SD Presentation Is Unavailable.');
+        return this.call(action, { type: 'built-in-local' });
+      }
       this.ensureLibrary();
       const { set, stored } = this.library.get(body.id, body.revision);
       if (body.preview === true || this.status.role === 'standalone') {
@@ -752,23 +876,30 @@ class Suite {
     return (this.library.state.sources || []).map(({ id, name, type }) => ({ id, name, type }));
   }
 
-  async addSource(body) {
+  async saveSource(body, existingId) {
     const { name, type } = body;
-    if (typeof name !== 'string' || !name.trim() || name.length > 80 || /[\p{Cc}]/u.test(name) || !liveSourceTypes.includes(type)) {
+    if (typeof name !== 'string' || !name.trim() || name.length > 80 || /[\p{Cc}]/u.test(name) || !liveSourceTypes.includes(type) ||
+        (body.url !== undefined && typeof body.url !== 'string')) {
       throw new RequestError(400, 'Enter a Name and Choose SRT, RTSP or Webpage.');
     }
-    const source = { id: randomBytes(12).toString('hex'), name: name.trim(), type, url: sourceUrl(body.url, type) };
     await this.library.transaction((next) => {
       next.sources ||= [];
-      if (next.sources.length >= 50) throw new RequestError(409, 'Remove a Saved Source Before Adding Another.');
-      if (next.sources.some(({ name }) => name.toLowerCase() === source.name.toLowerCase())) throw new RequestError(409, 'A Saved Source Already Uses That Name.');
-      next.sources.push(source);
+      const index = existingId ? next.sources.findIndex(({ id }) => id === existingId) : -1;
+      if (existingId && index < 0) throw new RequestError(404, 'Saved Source Not Found.');
+      if (!existingId && next.sources.length >= 50) throw new RequestError(409, 'Remove a Saved Source Before Adding Another.');
+      const url = sourceUrl(body.url || next.sources[index]?.url, type);
+      const source = { id: existingId || randomBytes(12).toString('hex'), name: name.trim(), type, url };
+      if (next.sources.some((item) => item.id !== existingId && item.name.toLowerCase() === source.name.toLowerCase())) {
+        throw new RequestError(409, 'A Saved Source Already Uses That Name.');
+      }
+      if (index >= 0) next.sources[index] = source;
+      else next.sources.push(source);
     });
     return this.savedSources();
   }
 
   async peer(request, response, url, json, send) {
-    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|seek|transport|layout|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
+    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|presentation|seek|transport|layout|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
     if (!match || this.status?.role !== 'leader') throw new RequestError(404, 'Peer action unavailable.');
     const player = match[1];
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization || '');
@@ -780,14 +911,15 @@ class Suite {
       const native = body.status;
       if (!native || native.playerid !== player || native.leader !== this.id || native.role !== 'follower') throw new RequestError(409, 'Peer role or leader does not match.');
       const ready = idPattern.test(body.ready) ? body.ready : '';
-      this.peers.set(player, { status: native, ready, problem: String(body.problem || '').slice(0, 160), seen: performance.now(), at: new Date().toISOString() });
+      this.peers.set(player, { status: native, ready, problem: String(body.problem || '').slice(0, 160),
+        presentation: cardMetadata(body.presentation), seen: performance.now(), at: new Date().toISOString() });
       const matches = native.domain === this.status.domain && native.group === this.status.group;
       const admitted = matches && this.activeMembers().includes(player);
       const audio = admitted && this.library.state.audioCommands?.[player];
       let group;
       if (admitted) {
         const snapshot = this.snapshot();
-        group = { timing: snapshot.timing, layout: snapshot.layout, seekable: this.playbackStatus()?.groupSeekable === true,
+        group = { timing: snapshot.timing, layout: snapshot.layout, presentation: this.cardPresentation(), seekable: this.playbackStatus()?.groupSeekable === true,
           players: snapshot.players.map(({ id, member, connection, status, thumbnail }) => ({
             id, member, thumbnail, connection: connection === 'local' ? 'online' : connection,
             status: status ? { role: String(status.role || '').slice(0, 12), output: String(status.output || '').slice(0, 24),
@@ -821,6 +953,17 @@ class Suite {
         if (!bytes) throw new RequestError(404, 'Preview Unavailable.');
         return send(response, 200, 'image/jpeg', bytes);
       }
+    }
+    if (match[2] === 'presentation' && request.method === 'POST') {
+      const peer = this.peers.get(player);
+      if (!this.activeMembers().includes(player) || !peer || performance.now() - peer.seen >= onlineMs ||
+          peer.status.group !== this.status.group || peer.status.domain !== this.status.domain) throw new RequestError(409, 'Player Is Outside the Active Group.');
+      return json(response, 200, await this.update(request, async () => {
+        const { task } = await readJson(request);
+        if (!['play', 'hide', 'restore'].includes(task)) throw new RequestError(400, 'Invalid SD Presentation Request.');
+        await this.cardAction(task);
+        return { ok: true };
+      }));
     }
     if (match[2] === 'transport' && request.method === 'POST') {
       const peer = this.peers.get(player);

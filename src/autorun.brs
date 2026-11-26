@@ -260,6 +260,7 @@ End Sub
 
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
     settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, cecremote: false, audiorevision: "", presentationtitle: "Presentation", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    settings.streamfallback = {id: "", asset: "", name: ""}
     title = ReadAsciiFile(root + "presentation-title.txt").Trim()
     If Len(title) > 0 And Len(title) <= 100 Then settings.presentationtitle = title
     If m.playerId = config.leader_id Then settings.role = "leader"
@@ -280,6 +281,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
         End If
     End If
     If not ValidRotation(settings.rotation) Then settings.rotation = 0
+    If settings.intent = "stop" Then settings.intent = "auto"
     config.group_id = settings.group
     config.ptp_domain = settings.domain
     config.leader_id = settings.leader
@@ -300,9 +302,15 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel.networkResult = ""
     panel.startup = invalid
     panel.identUntil = 0
+    panel.identMode = ""
     panel.retryAt = 0
     panel.retryDelay = 3
     panel.mediaCycle = ""
+    panel.streamFailures = 0
+    panel.streamHealthyAt = 0
+    panel.streamPosition = 0
+    panel.streamProgressAt = 0
+    panel.usingFallback = false
     Return panel
 End Function
 
@@ -328,6 +336,8 @@ Function PanelStatus(panel As Object) As Object
     data.cecavailable = panel.cec <> invalid
     data.cecremote = panel.settings.cecremote
     data.ident = panel.startup <> invalid
+    data.identmode = panel.identMode
+    data.streamfallback = panel.settings.streamfallback
     data.network = PanelNetwork(panel.network.GetCurrentConfig())
     data.networkresult = panel.networkResult
     If panel.scheduled Then
@@ -434,12 +444,12 @@ Function PanelFileMedia(panel As Object) As Boolean
 End Function
 
 Function PanelPlayback(panel As Object) As Object
-    current = {state: panel.state, source: panel.source, name: panel.name, revision: panel.revision, error: panel.error, pending: panel.change, controlversion: 1, jumpversion: 1, cycle: panel.mediaCycle, synced: PanelGroupMedia(panel), pausable: false, seekable: false}
+    current = {state: panel.state, source: panel.source, name: panel.name, revision: panel.revision, error: panel.error, pending: panel.change, controlversion: 1, jumpversion: 1, cycle: panel.mediaCycle, synced: PanelGroupMedia(panel), pausable: false, seekable: false, fallbackactive: panel.usingFallback}
     If panel.video = invalid Or panel.source = "web" Then Return current
     If panel.state <> "playing" And panel.state <> "paused" And panel.state <> "starting" Then Return current
     current.positionms = panel.video.GetPlaybackPosition()
     current.durationms = panel.video.GetDuration()
-    current.pausable = panel.role <> "follower" And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
+    current.pausable = (panel.role <> "follower" Or panel.localOverride) And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
     current.seekable = current.pausable And not current.synced And current.durationms > 0
     Return current
 End Function
@@ -612,7 +622,42 @@ Sub SetLiveSource(panel As Object, kind As String, url As String, name As Dynami
     panel.asset = ""
     panel.revision = ""
     panel.url = url
+    panel.streamFailures = 0
+    panel.usingFallback = false
 End Sub
+
+Function PanelStream(panel As Object) As Boolean
+    Return panel.source = "srt" Or panel.source = "rtsp"
+End Function
+
+Function PlayStreamFallback(panel As Object) As Boolean
+    fallback = panel.settings.streamfallback
+    If panel.streamFailures < 3 Or fallback.id = "" Then Return false
+    If fallback.id = "presentation" Then
+        ready = panel.video.GetFilePlayability(panel.baseline)
+        If Type(ready) <> "roAssociativeArray" Then Return false
+        If ready.file <> "playable" Or ready.video <> "playable" Then Return false
+    Else If not VerifiedAsset(panel, fallback.asset) Then
+        Return false
+    End If
+    original = {source: panel.source, name: panel.name, url: panel.url}
+    panel.source = "local"
+    If fallback.id = "presentation" Then panel.source = "built-in-local"
+    panel.name = fallback.name
+    panel.asset = fallback.asset
+    panel.url = ""
+    panel.usingFallback = true
+    If StartPanel(panel) Then
+        LogEvent("STREAM_FALLBACK_STARTED", {kind: original.source})
+        Return true
+    End If
+    panel.usingFallback = false
+    panel.source = original.source
+    panel.name = original.name
+    panel.url = original.url
+    panel.asset = ""
+    Return false
+End Function
 
 Sub RememberLiveSource(panel As Object)
     previous = panel.settings.selection
@@ -632,11 +677,11 @@ Function HtmlLayer(url As String, bounds As Object, port As Object, rotation As 
     Return CreateObject("roHtmlWidget", bounds, options)
 End Function
 
-Function ShowStartupCard(panel As Object) As Boolean
+Function ShowStartupCard(panel As Object, kind = "details" As String) As Boolean
     HideStartupCard(panel)
     encoding = CreateObject("roUrlTransfer")
     If encoding = invalid Then Return false
-    data = {player: m.playerId, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp}
+    data = {player: m.playerId, mode: kind, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp}
     network = panel.network.GetCurrentConfig()
     If Type(network) = "roAssociativeArray" And TextValue(network.ethernet_mac) Then data.mac = network.ethernet_mac
     updater = ParseJson(ReadAsciiFile(panel.root + "updates/github.json"))
@@ -662,6 +707,7 @@ Function ShowStartupCard(panel As Object) As Boolean
         Return false
     End If
     panel.startup.Raise()
+    panel.identMode = kind
     Return true
 End Function
 
@@ -670,6 +716,7 @@ Sub HideStartupCard(panel As Object)
     panel.startup.Hide()
     panel.startup = invalid
     panel.identUntil = 0
+    panel.identMode = ""
 End Sub
 
 Sub PanelCecInput(panel As Object, event As Object)
@@ -715,7 +762,9 @@ Function StartWebLayer(panel As Object) As Boolean
     End If
     panel.base = HtmlLayer(url, bounds, panel.htmlPort, panel.settings.rotation)
     If panel.base = invalid Then Return false
-    Return panel.base.Show()
+    shown = panel.base.Show()
+    If panel.startup <> invalid Then panel.startup.Raise()
+    Return shown
 End Function
 
 Sub RefreshOverlay(panel As Object)
@@ -751,6 +800,7 @@ Sub RefreshOverlay(panel As Object)
     Else
         panel.overlayState = "error"
     End If
+    If panel.startup <> invalid Then panel.startup.Raise()
 End Sub
 
 Sub PanelHtmlFeedback(panel As Object)
@@ -797,12 +847,16 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     panel.state = "starting"
     panel.loadAt = UpTime(0)
     If m.holding <> invalid Then m.holding.Hide()
+    If PanelLiveSource(panel) Then RememberLiveSource(panel)
     accepted = false
     If panel.source = "web" Then
         panel.video.StopClear()
         accepted = StartWebLayer(panel)
-    Else If panel.source = "srt" Or panel.source = "rtsp" Then
-        accepted = panel.video.PlayFile({Url: panel.url})
+    Else If PanelStream(panel) Then
+        panel.streamHealthyAt = 0
+        panel.streamPosition = 0
+        panel.streamProgressAt = 0
+        accepted = panel.video.PlayFile({Url: panel.url, StreamTimeout: 12000})
         If not accepted Then accepted = panel.video.PlayFile(panel.url)
     Else
         path = panel.baseline
@@ -830,7 +884,6 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
         ScheduleVideoRetry(panel)
         Return false
     End If
-    If PanelLiveSource(panel) Then RememberLiveSource(panel)
     If panel.source <> "web" Then RefreshOverlay(panel)
     Return true
 End Function
@@ -843,8 +896,28 @@ End Function
 
 Sub ScheduleVideoRetry(panel As Object)
     If not CanRetryVideo(panel) Then Return
+    If panel.retryAt <> 0 Then Return
+    If PanelStream(panel) Then panel.streamFailures = panel.streamFailures + 1
     panel.retryAt = UpTime(0) + panel.retryDelay
     If panel.retryDelay < 24 Then panel.retryDelay = panel.retryDelay * 2
+End Sub
+
+Sub CheckStreamProgress(panel As Object, now As Integer, playback As Object)
+    If not PanelStream(panel) Or playback.state <> "playing" Then Return
+    If panel.streamHealthyAt > 0 And now >= panel.streamHealthyAt Then
+        panel.streamHealthyAt = 0
+        panel.streamFailures = 0
+        panel.retryDelay = 3
+    End If
+    position = playback.positionms
+    If WholeNumber(position) And position > 0 And position <> panel.streamPosition Then
+        panel.streamPosition = position
+        panel.streamProgressAt = now
+    Else If panel.streamProgressAt > 0 And now >= panel.streamProgressAt + 20 Then
+        panel.state = "error"
+        panel.error = "The Stream Stalled. Reconnecting."
+        ScheduleVideoRetry(panel)
+    End If
 End Sub
 
 Function ParseGroupJump(syncId As String) As Dynamic
@@ -870,7 +943,9 @@ Sub PanelTick(panel As Object)
     now = UpTime(0)
     If m.clockWeb <> invalid And now >= panel.telemetryAt Then
         panel.telemetryAt = now + 1
-        m.clockWeb.PostJsMessage({protocol: "start-syncplayer-playback-v1", status: FormatJson(PanelPlayback(panel)), version: m.version})
+        playback = PanelPlayback(panel)
+        CheckStreamProgress(panel, now, playback)
+        m.clockWeb.PostJsMessage({protocol: "start-syncplayer-playback-v1", status: FormatJson(playback), version: m.version})
     End If
     If panel.state = "starting" And panel.loadAt > 0 And UpTime(0) > panel.loadAt + 20 Then
         panel.state = "error"
@@ -878,14 +953,14 @@ Sub PanelTick(panel As Object)
         ScheduleVideoRetry(panel)
     End If
     If UpTime(0) < panel.readyAt Then Return
-    If panel.identUntil = 0 Or now >= panel.identUntil Then HideStartupCard(panel)
+    If panel.identUntil = 0 Or (panel.identUntil > 0 And now >= panel.identUntil) Then HideStartupCard(panel)
     If panel.role = "follower" And not panel.localOverride Then Return
     If panel.retryAt > 0 And now >= panel.retryAt Then
         panel.retryAt = 0
         If CanRetryVideo(panel) Then
             LogEvent("NATIVE_VIDEO_RETRY", {source: panel.source})
             panel.video.StopClear()
-            StartPanel(panel)
+            If not PanelStream(panel) Or not PlayStreamFallback(panel) Then StartPanel(panel)
         End If
     End If
     If panel.role <> "follower" Then
@@ -992,7 +1067,11 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
     If panel.source = "web" Then Return
     If code = 3 And panel.state = "starting" Then
         panel.state = "playing"
-        panel.retryDelay = 3
+        If PanelStream(panel) Then
+            panel.streamHealthyAt = UpTime(0) + 10
+        Else
+            panel.retryDelay = 3
+        End If
     End If
     If code <> 8 Or (panel.state <> "playing" And panel.state <> "starting") Then Return
     If panel.source = "srt" Or panel.source = "rtsp" Then
@@ -1002,7 +1081,7 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
     Else If panel.nativeLoop = "seamless" Then
         StopPanel(panel, false)
         LogEvent("SEAMLESS_MEDIA_ENDED", {})
-    Else If panel.role <> "follower" And panel.settings.loop And panel.settings.intent = "auto" Then
+    Else If (panel.role <> "follower" Or panel.localOverride) And panel.settings.loop And panel.settings.intent = "auto" Then
         StartPanel(panel)
     Else
         StopPanel(panel, false)
@@ -1072,6 +1151,11 @@ Function PanelSet(panel As Object, patch As Object) As String
     If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
     If not BooleanValue(nextSettings.audioenabled) Then Return "Choose Whether to Enable HDMI Audio."
     If not BooleanValue(nextSettings.cecremote) Then Return "Choose Whether to Enable CEC Remote Playback."
+    fallback = nextSettings.streamfallback
+    If Type(fallback) <> "roAssociativeArray" Then Return "Invalid Stream Fallback."
+    If not TextValue(fallback.id) Or not TextValue(fallback.name) Or not TextValue(fallback.asset) Then Return "Invalid Stream Fallback."
+    If Len(fallback.id) > 50 Or Len(fallback.name) > 120 Then Return "Invalid Stream Fallback."
+    If fallback.id <> "" And fallback.id <> "presentation" And not SafeHex(fallback.asset, 64) Then Return "Invalid Stream Fallback File."
     If not TextValue(nextSettings.presentationtitle) Then Return "Enter a Presentation Title."
     If Len(nextSettings.presentationtitle) < 1 Or Len(nextSettings.presentationtitle) > 100 Then Return "Enter a Presentation Title of 1 to 100 Characters."
     If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
@@ -1164,13 +1248,16 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
     If not panel.ready Then Return "Native playback is still starting."
     If panel.change <> "" Then Return "The device is about to restart."
     If action = "ident" Then
-        If not WholeNumber(body.seconds) Then Return "Enter an IDENT Duration Between 0 and 30 Seconds."
-        If body.seconds < 0 Or body.seconds > 30 Then Return "Enter an IDENT Duration Between 0 and 30 Seconds."
+        If body.mode <> "details" And body.mode <> "test-pattern" Then Return "Choose IDENT or Test Pattern."
+        If not WholeNumber(body.seconds) Then Return "Enter a Duration in Whole Seconds."
+        If body.mode = "details" And (body.seconds < 0 Or body.seconds > 30) Then Return "Enter an IDENT Duration Between 0 and 30 Seconds."
+        If body.mode = "test-pattern" And (body.seconds < -1 Or body.seconds > 600) Then Return "Enter a Test Pattern Duration Between 0 and 600 Seconds."
         If body.seconds = 0 Then
             HideStartupCard(panel)
         Else
-            If not ShowStartupCard(panel) Then Return "Could Not Show the IDENT Screen."
-            panel.identUntil = UpTime(0) + body.seconds
+            If not ShowStartupCard(panel, body.mode) Then Return "Could Not Show the Requested Screen."
+            panel.identUntil = -1
+            If body.seconds > 0 Then panel.identUntil = UpTime(0) + body.seconds
         End If
         Return ""
     End If
@@ -1202,6 +1289,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         StopPanel(panel, false)
         panel.settings = saved
         panel.localOverride = false
+        panel.usingFallback = false
         panel.source = "built-in"
         panel.name = saved.presentationtitle
         panel.url = ""
@@ -1266,7 +1354,13 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If not SavePanel(panel, panel.settings) Then Return "The loop preference could not be saved."
         Return ""
     End If
-    If action = "arm" Then
+    If action = "retry-stream" Then
+        selected = panel.settings.selection
+        If Type(selected) <> "roAssociativeArray" Then Return "There Is No Saved Stream to Retry."
+        If selected.kind <> "srt" And selected.kind <> "rtsp" Then Return "There Is No Saved Stream to Retry."
+        SetLiveSource(panel, selected.kind, selected.url, selected.name)
+        panel.localOverride = panel.role = "follower"
+    Else If action = "arm" Then
         If not panel.waiting Or panel.source <> "group" Or body.revision <> panel.revision Then Return "That revision is not waiting."
         panel.waiting = false
     Else If action = "source" Then
@@ -1284,15 +1378,22 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         SetLiveSource(panel, body.type, body.url, body.name)
         panel.localOverride = panel.role = "follower"
     Else If action = "play" Then
-        If panel.role = "follower" Then Return "The configured leader controls group playback."
+        If panel.role = "follower" And body.type <> "built-in-local" Then Return "The configured leader controls group playback."
         If body.type <> "built-in" And body.type <> "built-in-local" And body.type <> "group" And body.type <> "preview" And body.type <> "local" Then Return "Unsupported source."
         If body.type = "group" And (not SafeHex(body.revision, 24) Or panel.role <> "leader") Then Return "Invalid group revision."
         builtIn = body.type = "built-in" Or body.type = "built-in-local"
         ephemeral = body.type = "preview" Or body.type = "built-in-local"
         If not builtIn And not VerifiedAsset(panel, body.asset) Then Return "The native file probe rejected this media."
+        If builtIn Then
+            probe = panel.video.GetFilePlayability(panel.baseline)
+            If Type(probe) <> "roAssociativeArray" Then Return "The SD Presentation File Is Unavailable."
+            If probe.file <> "playable" Or probe.video <> "playable" Then Return "The SD Presentation File Is Unavailable."
+        End If
         panel.waiting = false
         If ephemeral Or body.type = "local" Then PanelSignal(panel, "suite-stop-")
         panel.source = body.type
+        panel.usingFallback = false
+        If panel.role = "follower" Then panel.localOverride = true
         panel.asset = ""
         panel.revision = ""
         panel.url = ""
@@ -1303,7 +1404,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
             If body.type = "group" Then panel.revision = body.revision
         End If
         If not ephemeral Then panel.settings.selection = {kind: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name}
-    Else If action <> "restart" Or panel.waiting Or (panel.role = "follower" And not PanelLiveSource(panel)) Then
+    Else If action <> "restart" Or panel.waiting Or (panel.role = "follower" And not panel.localOverride) Then
         Return "This player cannot perform that command."
     End If
     panel.settings.intent = "auto"

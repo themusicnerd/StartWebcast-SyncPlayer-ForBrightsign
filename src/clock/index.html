@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>StartWebcast SyncPlayer</title>
+  <title>SyncPlayer</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/clock.css">
   <script src="/clock.js" defer></script>
 </head>
 <body>
   <header class="masthead">
-    <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><span class="brand-mark"><img src="/startwebcast.png" alt="" width="38" height="27"></span>StartWebcast SyncPlayer</a>
+    <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><span class="brand-mark"><img src="/startwebcast.png" alt="" width="38" height="27"></span>SyncPlayer</a>
     <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#sources">Sources &amp; Layers</a><a href="#library">Lower Layer Media Library</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
-    <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button><button id="ident" type="button" class="secondary" aria-pressed="false" disabled>IDENT</button></div>
+    <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button><button id="ident" type="button" class="secondary" aria-pressed="false" disabled>IDENT</button><button id="test-pattern" type="button" class="secondary" aria-pressed="false" disabled>Test Pattern</button></div>
   </header>
   <main>
     <section id="overview" aria-label="Overview" class="section">
@@ -76,13 +76,17 @@
             <div class="actions layer-actions"><button id="follow-group" type="button" class="secondary" hidden>Follow Group</button><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in the Lower Layer Media Library</a></div>
             <form id="saved-source-form" class="stack">
               <h4>Saved Sources</h4>
-              <div class="form-row"><label class="grow">Source<select name="id" required><option value="">No Saved Sources</option></select></label><button type="submit" disabled>Play Selected</button><button type="button" id="remove-source" class="secondary" disabled>Remove</button></div>
+              <div class="form-row"><label class="grow">Source<select name="id" required><option value="">No Saved Sources</option></select></label><button type="submit" disabled>Play Selected</button><button type="button" id="edit-source" class="secondary" disabled>Edit</button><button type="button" id="remove-source" class="secondary" disabled>Remove</button></div>
             </form>
             <form id="source-form" class="stack">
-              <h4>Add or Play a Source</h4>
+              <h4 id="source-form-title">Add or Play a Source</h4>
               <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="rtsp">RTSP Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" autocomplete="off" aria-describedby="source-help" required></label></div>
-              <div class="form-row"><label class="grow">Name for Saved Source<input name="name" maxlength="80" autocomplete="off"></label><button type="submit" id="save-source" class="secondary">Save Source</button><button type="submit">Play URL</button></div>
+              <div class="form-row"><label class="grow">Name for Saved Source<input name="name" maxlength="80" autocomplete="off"></label><button type="submit" id="save-source" class="secondary">Save Source</button><button type="submit" id="play-source-url">Play URL</button><button type="button" id="cancel-source-edit" class="secondary" hidden>Cancel</button></div>
               <p id="source-help" class="muted"></p>
+            </form>
+            <form id="stream-recovery" class="stack">
+              <h4>RTSP &amp; SRT Recovery</h4>
+              <div class="form-row"><label class="grow">After Repeated Connection Loss<select name="fallback"><option value="">Keep Retrying the Stream</option></select></label><button type="submit" class="secondary">Save Recovery</button><button type="button" id="retry-stream" class="secondary" hidden>Retry Last Stream</button></div>
             </form>
             <form id="window-form" class="stack">
               <h4>Position and Size</h4><div class="form-row dimensions"><label>Left %<input type="number" name="x" min="0" max="95" required></label><label>Top %<input type="number" name="y" min="0" max="95" required></label><label>Width %<input type="number" name="width" min="5" max="100" required></label><label>Height %<input type="number" name="height" min="5" max="100" required></label><button type="submit" class="secondary">Apply Window</button></div>
@@ -99,6 +103,7 @@
           <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
         </form>
         <div class="library-list" id="items"><p class="muted">Presentation is available from Playback.</p></div>
+        <div class="actions"><button type="button" class="secondary" id="restore-card-presentation" hidden>Restore SD Presentation</button></div>
         <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear Distribution</button></div>
       </section>
     </div>
@@ -177,6 +182,7 @@
           <details><summary>Identify a Player and Check its Status</summary><ol>
             <li>Select <strong>IDENT</strong> to show player and configuration details on its screen for 10 seconds.</li>
             <li>Select <strong>IDENT</strong> again to close it.</li>
+            <li>Select <strong>Test Pattern</strong> to show local colour bars. Select it again to return to the current output.</li>
             <li>Read <strong>Device Status</strong> for local metrics and the HDMI screen ID.</li>
             <li>Select <strong>Edit Layout</strong> to arrange the player previews for the group.</li>
           </ol></details>
@@ -251,7 +257,7 @@
               <dt>PUT <code>/group/audio/B</code></dt><dd>Send <code>{"enabled":true}</code> to enable HDMI audio on Player B.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
-              <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds. Send <code>{"seconds":0}</code> to hide it, or set a duration of up to 30 seconds.</dd>
+              <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds, or send <code>{"mode":"test-pattern"}</code> to show local colour bars. Send <code>{"seconds":0}</code> to close either screen.</dd>
               <dt>GET <code>/network</code></dt><dd>Read the Ethernet mode, address, mask, gateway and DNS settings.</dd>
               <dt>GET <code>/sources</code></dt><dd>List saved SRT feeds, RTSP feeds and webpages. Send a saved ID to <code>POST /source</code> to start it.</dd>
               <dt>GET <code>/updates</code></dt><dd>Read the running version and GitHub source.</dd>

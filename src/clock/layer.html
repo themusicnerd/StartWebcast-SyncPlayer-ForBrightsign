@@ -17,6 +17,23 @@
     #diagnostics div{min-width:0;border-top:1px solid #77569b;padding-top:1vh}
     dt{color:#d8c3f1;font-size:1.75vh;margin-bottom:.4vh}
     dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+    #test-pattern{position:absolute;inset:0;background:#000;color:#fff;font:2.4vmin Arial,sans-serif}
+    .colour-bars{position:absolute;inset:0;display:grid;grid-template-rows:7fr 1fr 1fr 3fr}
+    .bars-main{background:linear-gradient(90deg,#666 12.5%,#bfbfbf 12.5% 23.2%,#bfbf00 23.2% 33.9%,#00bfbf 33.9% 44.6%,#00bf00 44.6% 55.4%,#bf00bf 55.4% 66.1%,#bf0000 66.1% 76.8%,#0000bf 76.8% 87.5%,#666 87.5%)}
+    .bars-colour{background:linear-gradient(90deg,#00ffff 12.5%,#003f69 12.5% 23.2%,#bfbfbf 23.2% 87.5%,#0000ff 87.5%)}
+    .bars-ramp{display:grid;grid-template-columns:12.5% 10.7% 53.6% 10.7% 12.5%}
+    .bars-ramp span:nth-child(1){background:#ffff00}.bars-ramp span:nth-child(2){background:#410077}
+    .bars-ramp span:nth-child(3){background:linear-gradient(90deg,#000,#fff)}
+    .bars-ramp span:nth-child(4){background:#fff}.bars-ramp span:nth-child(5){background:#f00}
+    .bars-black{background:linear-gradient(90deg,#262626 12.5%,#000 12.5% 28.5%,#fff 28.5% 50%,#000 50% 59%,#0b0b0b 59% 62.5%,#000 62.5% 66%,#050505 66% 69.5%,#000 69.5% 73%,#111 73% 76.5%,#000 76.5% 87.5%,#262626 87.5%)}
+    .alignment-circle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:78vmin;height:78vmin;border:1px solid #fffd;border-radius:50%;box-shadow:0 0 0 1px #0008}
+    .alignment-circle::before,.alignment-circle::after{content:"";position:absolute;background:#fffd;box-shadow:0 0 0 1px #0008}
+    .alignment-circle::before{top:50%;left:50%;width:100vw;height:1px;transform:translateX(-50%)}
+    .alignment-circle::after{top:50%;left:50%;width:1px;height:100vh;transform:translateY(-50%)}
+    .pattern-label{position:absolute;top:3%;margin:0;padding:.6em .8em;background:#000e}
+    #pattern-output{left:3%}#pattern-output strong,#pattern-output span{display:block}
+    #pattern-output span{font-size:.8em;margin-top:.25em}
+    #pattern-player{right:3%;color:#ffac68;font-size:1.45em;font-weight:700;text-align:right}
     @media (orientation:portrait){
       #startup{font-size:1.85vh;padding:3vh 5vw}
       .startup-header{grid-template-columns:minmax(0,1fr) auto;gap:1vh 2vw;margin-bottom:2vh}
@@ -40,6 +57,12 @@
     </header>
     <dl id="diagnostics"></dl>
   </main>
+  <section id="test-pattern" aria-label="Test Pattern" hidden>
+    <div class="colour-bars" aria-hidden="true"><div class="bars-main"></div><div class="bars-colour"></div><div class="bars-ramp"><span></span><span></span><span></span><span></span><span></span></div><div class="bars-black"></div></div>
+    <div class="alignment-circle" aria-hidden="true"></div>
+    <p id="pattern-output" class="pattern-label"><strong>Test Pattern</strong><span></span></p>
+    <p id="pattern-player" class="pattern-label"></p>
+  </section>
   <iframe id="lower" title="Lower webpage" sandbox="allow-scripts allow-same-origin" allow="autoplay"></iframe>
   <iframe id="upper" title="Upper HTML5 overlay" sandbox="allow-scripts allow-same-origin"></iframe>
 </body>

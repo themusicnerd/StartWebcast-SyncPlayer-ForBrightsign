@@ -16,6 +16,8 @@ let readingPlayback = false;
 let scrubbing = false;
 let layoutDraft;
 let pendingUploads = [];
+let savedSources = [];
+let editingSource;
 
 function showMessage(message, error = false) {
   const toast = $('#feedback');
@@ -101,7 +103,7 @@ function renderPlayback(current) {
   playback = current;
   $('#playback-state').textContent = current.pending ? 'Restart Pending' : (states[current.state] || current.state);
   $('#playback-state').dataset.state = current.state;
-  $('#playback-error').textContent = current.error || dashboard?.problem || '';
+  $('#playback-error').textContent = current.error || (current.fallbackactive ? 'Stream Unavailable. Playing the Selected Library Clip.' : dashboard?.problem) || '';
   $('#source-name').textContent = current.name;
   const source = labels[current.source] || 'Source';
   $('#base-state').textContent = states[current.state] || 'Unknown';
@@ -194,14 +196,16 @@ function previewUrl(player) {
   return player?.thumbnail ? `/api/v1/players/${player.id}/preview?v=${encodeURIComponent(player.thumbnail)}` : '';
 }
 
-function showLayerPreview(player, overlay) {
+function showLayerPreview(player, native) {
   const image = $('#layer-preview');
   const path = previewUrl(player);
   if (path && image.getAttribute('src') !== path) image.src = path;
   if (!path) image.removeAttribute('src');
   image.hidden = !path;
   $('#layer-preview-empty').hidden = !!path;
-  $('#output-preview-label').textContent = overlay ? 'Display Preview · Both Layers' : 'Display Preview · Lower Layer';
+  const layer = native?.identmode === 'test-pattern' ? 'Test Pattern' : native?.identmode === 'details' ? 'IDENT' :
+    native?.overlay && native.state !== 'blackout' ? 'Both Layers' : 'Lower Layer';
+  $('#output-preview-label').textContent = `Display Preview · ${layer}`;
 }
 
 function drawLayoutEditor() {
@@ -267,8 +271,9 @@ function renderStatus() {
   if (native) {
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
     $('#firmware-version').textContent = `Installed Version ${native.firmware}`;
-    $('#ident').disabled = native.state === 'booting';
-    $('#ident').setAttribute('aria-pressed', String(native.ident === true));
+    $('#ident').disabled = $('#test-pattern').disabled = native.state === 'booting';
+    $('#ident').setAttribute('aria-pressed', String(native.identmode === 'details'));
+    $('#test-pattern').setAttribute('aria-pressed', String(native.identmode === 'test-pattern'));
     if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = 'Use HDMI Audio and Volume to Control Native Video and SRT Audio on This Player.';
@@ -282,13 +287,23 @@ function renderStatus() {
     $('#overlay-state').dataset.state = ['error', 'graphics-order-error'].includes(native.overlaystate) ? 'error' : '';
     $('#layout-overlay').hidden = $('#overlay-key').hidden = !native.overlay || native.state === 'blackout';
     $('#clear-overlay').disabled = !native.overlay;
-    $('#source-built-in').disabled = native.role === 'follower';
+    $('#source-built-in').hidden = dashboard.presentation?.hidden === true;
     $('#follow-group').hidden = !native.localoverride;
+    $('#retry-stream').hidden = !['srt', 'rtsp'].includes(native.startupsource);
+    $('#restore-card-presentation').hidden = !dashboard.presentation?.hidden;
+    $('#stream-recovery [type=submit]').disabled = !dashboard.recovery;
+    const recovery = $('#stream-recovery');
+    if (dashboard.recovery && !recovery.dataset.dirty) {
+      const select = recovery.elements.fallback;
+      select.replaceChildren(Object.assign(item('option', 'Keep Retrying the Stream'), { value: '' }),
+        ...dashboard.recovery.options.map(({ id, name }) => Object.assign(item('option', `Play ${name}`), { value: id })));
+      select.value = dashboard.recovery.fallback;
+    }
     const startup = labels[native.startupsource];
     $('#startup-source').hidden = !startup;
     if (startup) $('#startup-source').textContent = `On Startup · ${startup}`;
     drawWindow(native.rect);
-    for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
+    for (const button of document.querySelectorAll('[data-command^="built-in"]')) button.hidden = dashboard.presentation?.hidden === true;
     $('#upload').hidden = native.role === 'follower';
     fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false, cecremote: native.cecremote === true });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
@@ -333,7 +348,7 @@ function renderStatus() {
   }
   const layout = dashboard.layout || { rows: 1, columns: Math.min(3, Math.max(1, players.length)), cells: players.slice(0, 3).map(({ id }) => id) };
   $('#edit-player-layout').disabled = !dashboard.layout;
-  showLayerPreview(local, native?.overlay && native.state !== 'blackout');
+  showLayerPreview(local, native);
   const roster = new Map(players.map((player) => [player.id, player]));
   const list = layout.cells.map((id) => {
     const player = roster.get(id);
@@ -387,15 +402,16 @@ function renderStatus() {
 async function refresh() {
   try {
     const previousRole = dashboard?.native?.role;
+    const previousPresentation = JSON.stringify(dashboard?.presentation);
     dashboard = await api('status');
     renderStatus();
-    if (previousRole !== dashboard.native?.role) renderLibrary();
+    if (previousRole !== dashboard.native?.role || previousPresentation !== JSON.stringify(dashboard.presentation)) void refreshLibrary();
   } catch (error) {
     $('#connection').textContent = 'Disconnected';
     $('#connection').dataset.state = 'offline';
     $('#tv-power').textContent = 'TV Unknown';
     $('#tv-power').dataset.state = 'unknown';
-    $('#cec-on').disabled = $('#cec-standby').disabled = $('#snapshot').disabled = $('#ident').disabled = true;
+    $('#cec-on').disabled = $('#cec-standby').disabled = $('#snapshot').disabled = $('#ident').disabled = $('#test-pattern').disabled = true;
   }
 }
 
@@ -411,7 +427,7 @@ function renderLibrary() {
   select.replaceChildren(...options);
   select.value = options.some((option) => option.value === selected) ? selected : '';
   if (!library.length) {
-    $('#items').replaceChildren(item('p', 'Built-in Presentation is available from Playback.', 'muted'));
+    $('#items').replaceChildren(item('p', 'No Media in the Library.', 'muted'));
     return;
   }
   const native = dashboard?.native;
@@ -419,13 +435,24 @@ function renderLibrary() {
     const card = item('article', undefined, 'library-item');
     card.append(item('h3', set.name));
     if (set.card) {
-      card.append(item('p', 'Presentation on the SD Card', 'muted'));
-      if (native?.role !== 'follower') {
-        const controls = item('div', undefined, 'actions');
-        controls.append(action('Play Presentation', () => command('play', { id: set.id })));
-        if (native?.role === 'leader') controls.append(action('Preview Locally', () => command('play', { id: set.id, preview: true })));
-        card.append(controls);
+      const clips = set.clips || [];
+      const players = clips.map(({ id }) => id).join('');
+      card.append(item('p', clips.length > 1 ? `Multi-Screen · ${players} · SD Card Presentation` : 'SD Card Presentation', 'muted'));
+      const details = item('ul', undefined, 'card-media-details');
+      for (const { id, media } of clips) {
+        const format = media?.video;
+        const line = !media ? 'Waiting for Media Report' : !media.present ? 'File Missing' : [
+          format && `${format.width} × ${format.height} · ${format.rate.toFixed(2)} fps · ${format.codec}`,
+          media.audio, media.seconds && duration(media.seconds), media.bytes && bytes(media.bytes),
+        ].filter(Boolean).join(' · ') || 'Metadata Unavailable';
+        details.append(item('li', `Player ${id} · ${line}`));
       }
+      card.append(details);
+      const controls = item('div', undefined, 'actions');
+      controls.append(action(native?.role === 'standalone' ? 'Play on This Player' : 'Play Group', () => command('play', { id: set.id })),
+        action('Preview on This Player', () => command('play', { id: set.id, preview: true })),
+        action('Delete From Library', () => changeCardPresentation(true), 'danger'));
+      card.append(controls);
       return card;
     }
     if (set.draft.length) {
@@ -459,6 +486,17 @@ function renderLibrary() {
     return card;
   });
   $('#items').replaceChildren(...items);
+}
+
+async function changeCardPresentation(remove) {
+  if (remove && !confirm('Delete This Entry From the Media Library? The Original Files Stay on the SD Cards.')) return;
+  const result = await operate(() => api('content/presentation', remove ? 'DELETE' : 'PUT', { confirm: true }),
+    remove ? 'SD Presentation Removed From the Library.' : 'SD Presentation Restored.');
+  if (result) {
+    if (remove) { library = library.filter(({ id }) => id !== 'presentation'); renderLibrary(); }
+    await refresh();
+    await refreshLibrary();
+  }
 }
 
 async function refreshLibrary() {
@@ -629,6 +667,7 @@ setInterval(refreshPreviewsWhenVisible, 30000);
 const savedSourceForm = $('#saved-source-form');
 const sourceSelect = savedSourceForm.elements.id;
 function populateSources(sources) {
+  savedSources = sources;
   const previous = sourceSelect.value;
   sourceSelect.replaceChildren(Object.assign(item('option', sources.length ? 'Choose a Saved Source' : 'No Saved Sources'), { value: '' }),
     ...sources.map(({ id, name, type }) => Object.assign(item('option', `${name} · ${labels[type]}`), { value: id })));
@@ -636,25 +675,48 @@ function populateSources(sources) {
   sourceSelect.dispatchEvent(new Event('change'));
 }
 sourceSelect.addEventListener('change', () => {
-  savedSourceForm.querySelector('[type=submit]').disabled = $('#remove-source').disabled = !sourceSelect.value;
+  savedSourceForm.querySelector('[type=submit]').disabled = $('#remove-source').disabled = $('#edit-source').disabled = !sourceSelect.value;
 });
 form('#saved-source-form', () => command('source', { id: sourceSelect.value }));
+function editSavedSource(source) {
+  editingSource = source;
+  sourceFields.name.value = source?.name || '';
+  sourceFields.url.value = '';
+  sourceFields.url.required = !source;
+  if (source) sourceFields.type.value = source.type;
+  $('#source-form-title').textContent = source ? 'Edit Saved Source' : 'Add or Play a Source';
+  $('#save-source').textContent = source ? 'Save Changes' : 'Save Source';
+  $('#play-source-url').hidden = Boolean(source);
+  $('#cancel-source-edit').hidden = !source;
+  showSourceInput();
+  if (source) sourceFields.name.focus();
+}
+$('#edit-source').addEventListener('click', () => {
+  const source = savedSources.find(({ id }) => id === sourceSelect.value);
+  if (source) editSavedSource(source);
+});
+$('#cancel-source-edit').addEventListener('click', () => editSavedSource());
 $('#remove-source').addEventListener('click', async () => {
   if (!sourceSelect.value || !confirm('Remove the Selected Saved Source?')) return;
   const result = await operate(() => api(`sources/${sourceSelect.value}`, 'DELETE'), 'Saved Source Removed.');
-  if (result) populateSources(result);
+  if (result) {
+    if (editingSource?.id === sourceSelect.value) editSavedSource();
+    populateSources(result);
+  }
 });
 $('#source-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const fields = event.currentTarget.elements;
   const source = { type: fields.type.value, url: fields.url.value.trim() };
-  if (event.submitter?.id !== 'save-source') return command('source', source);
-  const result = await operate(() => api('sources', 'POST', { ...source, name: fields.name.value.trim() }), 'Source Saved.');
+  if (!editingSource && event.submitter?.id !== 'save-source') return command('source', source);
+  const previous = editingSource?.id;
+  const result = await operate(() => api(previous ? `sources/${previous}` : 'sources', previous ? 'PUT' : 'POST',
+    { ...source, name: fields.name.value.trim() }), 'Source Saved.');
   if (result) {
     populateSources(result);
-    sourceSelect.value = result.at(-1).id;
+    sourceSelect.value = previous || result.at(-1).id;
     sourceSelect.dispatchEvent(new Event('change'));
-    fields.url.value = fields.name.value = '';
+    editSavedSource();
   }
 });
 void api('sources').then(populateSources).catch(() => {});
@@ -664,12 +726,20 @@ function showSourceInput() {
   const examples = { srt: 'srt://encoder:9000?mode=caller', rtsp: 'rtsp://encoder:554/live', web: 'https://server/page.html' };
   const instructions = { srt: 'Use an SRT Caller or Listener URL.', rtsp: 'Use the RTSP URL From the Camera or Encoder.', web: 'Use an HTTP or HTTPS URL.' };
   sourceFields.url.placeholder = examples[type];
-  $('#source-help').textContent = instructions[type];
+  const keep = editingSource?.type === type;
+  $('#source-help').textContent = keep ? 'Leave the URL Blank to Keep the Saved Address.' : instructions[type];
+  sourceFields.url.required = !keep;
 }
 sourceFields.type.addEventListener('change', showSourceInput);
 showSourceInput();
 $('#source-built-in').addEventListener('click', () => command('play', { id: 'presentation' }));
 $('#follow-group').addEventListener('click', () => command('follow'));
+$('#retry-stream').addEventListener('click', () => command('retry-stream'));
+$('#restore-card-presentation').addEventListener('click', () => changeCardPresentation(false));
+form('#stream-recovery', async (fields, element) => {
+  const result = await operate(() => api('stream-recovery', 'PUT', { fallback: fields.fallback.value }), 'Stream Recovery Saved.', element);
+  if (result) await refresh();
+});
 form('#window-form', (fields, element) => saveSettings(element, { rect: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, Number(fields[key].value)])) }));
 form('#overlay-form', (fields, element) => saveSettings(element, { overlay: fields.url.value.trim() }));
 $('#clear-overlay').addEventListener('click', () => {
@@ -705,11 +775,14 @@ $('#snapshot-dialog').addEventListener('close', () => {
   URL.revokeObjectURL(image.src);
   image.removeAttribute('src');
 });
-$('#ident').addEventListener('click', async () => {
-  const seconds = $('#ident').getAttribute('aria-pressed') === 'true' ? 0 : 10;
-  await operate(() => api('ident', 'POST', { seconds }), seconds ? 'IDENT Shown for 10 Seconds.' : 'IDENT Hidden.');
-  await refresh();
-});
+for (const [selector, mode, label] of [['#ident', 'details', 'IDENT'], ['#test-pattern', 'test-pattern', 'Test Pattern']]) {
+  $(selector).addEventListener('click', async () => {
+    const hide = $(selector).getAttribute('aria-pressed') === 'true';
+    const request = hide ? { mode, seconds: 0 } : { mode };
+    await operate(() => api('ident', 'POST', request), `${label} ${hide ? 'Hidden' : 'Shown'}.`);
+    await refresh();
+  });
+}
 const networkFields = $('#network-form').elements;
 function showNetworkMode() {
   const isStatic = networkFields.mode.value === 'static';

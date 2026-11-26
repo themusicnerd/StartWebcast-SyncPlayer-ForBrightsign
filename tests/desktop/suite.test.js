@@ -56,6 +56,22 @@ test('only accepts PTPv2 Announce packets with a valid domain and message length
   assert.equal(announceDomain(announce), null);
 });
 
+test('edits named sources in place and preserves a blank replacement URL', async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-sources-'));
+  const config = { card_player_id: 'A', players: { '127.0.0.1': 'A' } };
+  const suite = new Suite({ config, host: '127.0.0.1', root, native: async () => ({ ok: 'yes' }), watch: null });
+  try {
+    await suite.library.init();
+    const [saved] = await suite.saveSource({ name: 'Camera', type: 'rtsp', url: 'rtsp://example:sample@camera/live' });
+    assert.equal(saved.url, undefined);
+    const [renamed] = await suite.saveSource({ name: 'Studio Camera', type: 'rtsp', url: '' }, saved.id);
+    assert.deepEqual(renamed, { ...saved, name: 'Studio Camera' });
+    assert.equal(suite.library.state.sources[0].url, 'rtsp://example:sample@camera/live');
+    await assert.rejects(suite.saveSource({ name: 'Studio Camera', type: 'web', url: '' }, saved.id), /source URL|HTTP or HTTPS/);
+    await assert.rejects(suite.saveSource({ name: 'Studio Camera', type: 'rtsp', url: 'rtsp://different/camera' }), /Uses That Name/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('streams drafts, rejects mismatched members and durably replaces only complete revisions', async () => {
   const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-library-'));
   try {
@@ -96,6 +112,11 @@ test('blocks an unprepared native group and selects local MP4 in standalone', as
   const native = async (action, { data }) => { sent = { action, body: JSON.parse(data) }; return { ok: 'yes' }; };
   const suite = new Suite({ config, host: '127.0.0.1', root, native, watch: null });
   try {
+    await suite.command('ident', { mode: 'test-pattern' });
+    assert.deepEqual(sent, { action: 'ident', body: { mode: 'test-pattern', seconds: -1 } });
+    await suite.command('ident', { seconds: 0 });
+    assert.deepEqual(sent, { action: 'ident', body: { mode: 'details', seconds: 0 } });
+    await assert.rejects(suite.command('ident', { mode: 'test-pattern', seconds: 601 }), /600 Seconds/);
     const id = 'a'.repeat(24);
     const revision = 'b'.repeat(24);
     const digest = 'c'.repeat(64);

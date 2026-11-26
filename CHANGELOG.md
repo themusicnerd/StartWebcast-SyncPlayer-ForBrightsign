@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.19
+
+- Show SD presentation metadata by player. Add group play, local preview and reversible removal of the library entry.
+- Restore the last source after a restart, including when the operator stopped it before shutdown.
+- Retry RTSP and SRT with backoff. Allow a locally available library clip as a fallback after repeated failures.
+- Edit saved source names, types and URLs.
+
+## 0.2.18
+
+- Add local colour bars with a right-aligned player name to the Test Pattern control.
+- Show SyncPlayer beside the StartWebcast logo in the web console.
+
 ## 0.2.17
 
 - Show SyncPlayer beside the StartWebcast logo and right-align the player name on the IDENT screen.

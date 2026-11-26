@@ -107,6 +107,7 @@ button.danger { color: #ffd0e0; border-color: #7b4564; background: #432539; }
 .library-item { padding: 9px 12px 12px; border: 1px solid #543d72; border-radius: 5px; background: #281d3b; }
 .library-item h3 { overflow-wrap: anywhere; }
 .library-item .actions { margin-bottom: 0; }
+.card-media-details { display: grid; gap: 4px; list-style: none; padding: 0; margin: 8px 0; font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
 .revision { margin-top: 10px; padding-top: 9px; border-top: 1px solid #51396c; }
 .distribution { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; font-size: .85rem; }
 .distribution button { margin-top: 8px; }

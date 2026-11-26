@@ -25,6 +25,12 @@ function showLayers() {
 function showStartup(data) {
   lower.remove();
   upper.remove();
+  if (data.mode === 'test-pattern') {
+    document.querySelector('#pattern-player').textContent = `Player ${data.player}`;
+    document.querySelector('#pattern-output span').textContent = `${data.output} · ${data.rotation}°`;
+    document.querySelector('#test-pattern').hidden = false;
+    return;
+  }
   const value = (text) => text === undefined || text === null || text === '' ? 'Unavailable' : text;
   const role = { leader: 'Leader', follower: 'Follower', standalone: 'Standalone' };
   const lighting = data.lighting || {};

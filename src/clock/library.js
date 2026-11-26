@@ -210,10 +210,10 @@ class Library {
   assignment(player, revision) {
     const job = this.state.dispatch;
     if (!this.members.includes(player) || !job || (revision && revision !== job.revision)) return null;
-    const { stored } = this.get(job.id, job.revision);
+    const { set, stored } = this.get(job.id, job.revision);
     if (!this.covers(stored)) return null;
     const { digest, length } = stored.files[player];
-    return { revision: stored.revision, digest, length };
+    return { revision: stored.revision, digest, length, name: set.name };
   }
 
   covers(stored) {
