@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.8
+
+- Use the bundled StartWebcast mark as the browser tab icon.
+
 ## 0.2.7
 
 - Keep playback and the HTML5 overlay running while the schedule sends HDMI-CEC display power commands.
