@@ -36,11 +36,6 @@ Sub RunPlayback(port As Object)
         LogEvent("NETWORK_INTERFACE_UNAVAILABLE", {interface_name: "eth0"})
         Return
     End If
-    If config.static_ipv4 <> invalid Then
-        m.playerId = cardId
-        If not ProvisionStaticIPv4(network, config.static_ipv4, port) Then Return
-    End If
-
     scheduled = config.display_schedule <> invalid
     clock = invalid
     If scheduled Then
@@ -273,29 +268,10 @@ Function ValidConfig(config As Dynamic) As Boolean
     If Len(config.card_player_id) <> 1 Or Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.card_player_id) = 0 Then Return false
     If not ids.DoesExist(config.card_player_id) Then Return false
     If config.output_mode <> "3840x2160x50p" And config.output_mode <> "1920x1080x50p" Then Return false
-    If config.static_ipv4 <> invalid Then
-        If not ValidStaticIPv4(config.static_ipv4, config.players, config.card_player_id) Then Return false
-    End If
     If config.display_schedule <> invalid Then
         If not ValidDisplaySchedule(config.display_schedule) Or config.loop_mode <> "reschedule" Then Return false
     End If
     Return true
-End Function
-
-Function ValidStaticIPv4(profile As Dynamic, players As Object, cardId As String) As Boolean
-    If Type(profile) <> "roAssociativeArray" Then Return false
-    If not TextValue(profile.address) Or not TextValue(profile.broadcast) Or not TextValue(profile.netmask) Then Return false
-    If profile.netmask <> "255.255.255.0" Or players[profile.address] <> cardId Then Return false
-    dot = Instr(1, profile.address, ".")
-    For index = 1 To 2
-        If dot = 0 Then Return false
-        dot = Instr(dot + 1, profile.address, ".")
-    End For
-    If dot = 0 Then Return false
-    octet = Mid(profile.address, dot + 1)
-    hostNumber = StrToI(octet)
-    If hostNumber < 1 Or hostNumber > 254 Or Mid(StrI(hostNumber), 2) <> octet Then Return false
-    Return profile.broadcast = Left(profile.address, dot) + "255"
 End Function
 
 Function ValidDisplaySchedule(schedule As Dynamic) As Boolean
@@ -397,55 +373,6 @@ Function TextValue(value As Dynamic) As Boolean
     kind = Type(value)
     Return kind = "String" Or kind = "roString"
 End Function
-
-Function ProvisionStaticIPv4(network As Object, profile As Object, port As Object) As Boolean
-    registry = CreateObject("roRegistrySection", "StartSyncPlayer")
-    If registry = invalid Then
-        RecordStaticStatus("STATIC_IPV4_REGISTRY_UNAVAILABLE", profile.address)
-        Return false
-    End If
-    signature = profile.address + "/" + profile.netmask
-    If registry.Read("static_eth0") = signature Then Return true
-
-    If not MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then
-        RecordStaticStatus("STATIC_IPV4_APPLYING", profile.address)
-        If not ApplyStaticIPv4(network, profile) Then
-            RecordStaticStatus("STATIC_IPV4_APPLY_FAILED", profile.address)
-            Return false
-        End If
-        For attempt = 1 To 30
-            If MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then Exit For
-            Wait(1000, port)
-        End For
-        If not MatchesStaticIPv4(network.GetCurrentConfig(), profile) Then
-            RecordStaticStatus("STATIC_IPV4_NOT_CONFIRMED", profile.address)
-            Return false
-        End If
-    End If
-    If not registry.Write("static_eth0", signature) Or not registry.Flush() Then
-        RecordStaticStatus("STATIC_IPV4_MARKER_FAILED", profile.address)
-        Return false
-    End If
-    RecordStaticStatus("STATIC_IPV4_READY", profile.address)
-    Return true
-End Function
-
-Function ApplyStaticIPv4(network As Object, profile As Object) As Boolean
-    If not network.SetIP4Address(profile.address) Then Return false
-    If not network.SetIP4Netmask(profile.netmask) Then Return false
-    If not network.SetIP4Broadcast(profile.broadcast) Then Return false
-    Return network.Apply()
-End Function
-
-Function MatchesStaticIPv4(current As Dynamic, profile As Object) As Boolean
-    If Type(current) <> "roAssociativeArray" Then Return false
-    Return current.dhcp = false And current.ip4_address = profile.address And current.ip4_netmask = profile.netmask
-End Function
-
-Sub RecordStaticStatus(status As String, address As String)
-    LogEvent(status, {ip: address})
-    WriteAsciiFile(GetDefaultDrive() + "network-setup.txt", status + " " + address + Chr(13) + Chr(10))
-End Sub
 
 Function WaitForAddress(network As Object, players As Object, port As Object) As String
     LogEvent("WAITING_FOR_ETH0", {})
@@ -550,7 +477,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.1.2"
+    fields.version = "0.1.3"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)

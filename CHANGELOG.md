@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 · 26 November 2026
+
+- Use a separate startup script on each presentation card to configure Ethernet and optional authenticated local diagnostics before loading playback.
+- Record startup stages and any returned playback errors in a bounded SD report.
+
 ## 0.1.2 · 26 November 2026
 
 - Configure A, B and C with the static IPv4 settings carried by their individual cards, before playback setup.

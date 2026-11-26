@@ -17,10 +17,14 @@ def main():
     source, replaced = re.subn(r"(?im)^Sub Main\(\)$", "Sub BenchMain()", source, count=1)
     if replaced != 1:
         raise SystemExit("Could not isolate the hardware entry point")
+    bootstrap = (ROOT / "src/card_bootstrap.brs").read_text(encoding="utf-8")
+    bootstrap, replaced = re.subn(r"(?im)^Sub Main\(\)$", "Sub CardBootstrapMain()", bootstrap, count=1)
+    if replaced != 1:
+        raise SystemExit("Could not isolate the card bootstrap entry point")
     mock = ROOT / "tests/desktop/native_mock.brs"
     with tempfile.TemporaryDirectory(prefix="start-syncplayer-test-") as temporary:
         runtime = Path(temporary) / "bench.brs"
-        runtime.write_text(source + "\n" + mock.read_text(encoding="utf-8"), encoding="utf-8")
+        runtime.write_text(source + "\n" + bootstrap + "\n" + mock.read_text(encoding="utf-8"), encoding="utf-8")
         command = [npm, "exec", "--yes", "--package=brs@0.45.0", "--", "brs", str(runtime)]
         result = subprocess.run(
             command, cwd=temporary, text=True, capture_output=True, timeout=120,

@@ -187,11 +187,12 @@ def write_card_boot_files(directory, config, player, media_manifest):
         },
         "display_schedule": {"timezone": "Australia/Sydney", "on": "07:00", "off": "21:00"},
     }
-    shutil.copyfile(ROOT / "src/autorun.brs", directory / "autorun.brs")
+    shutil.copyfile(ROOT / "src/card_bootstrap.brs", directory / "autorun.brs")
+    shutil.copyfile(ROOT / "src/autorun.brs", directory / "playback.brs")
     (directory / "syncplayer.json").write_bytes(json_bytes(card_config))
     shutil.copyfile(ROOT / "VERSION", directory / "VERSION")
     manifest = media_manifest | {
-        name: sha256(directory / name) for name in ("autorun.brs", "syncplayer.json", "VERSION")
+        name: sha256(directory / name) for name in ("autorun.brs", "playback.brs", "syncplayer.json", "VERSION")
     }
     checksums = "".join(f"{digest}  {name}\n" for name, digest in sorted(manifest.items()))
     (directory / "SHA256SUMS").write_bytes(checksums.encode("ascii"))

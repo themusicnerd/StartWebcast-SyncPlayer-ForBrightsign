@@ -6,3 +6,4 @@ releases/*.zip
 releases/*.sha256
 /content/
 /sdcard/
+dws-password.txt

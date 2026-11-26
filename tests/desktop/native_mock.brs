@@ -39,11 +39,15 @@ Sub Main()
     config.display_schedule = schedule
     config.loop_mode = "reschedule"
     Check(ValidConfig(config), "static IP and daily Sydney schedule")
+    Check(ValidStaticIPv4(profile, config.players, config.card_player_id), "static profile accepted for its card")
+    Check(TrimCardPassword("Example7-setup" + Chr(13) + Chr(10)) = "Example7-setup", "trim only password line ending")
+    Check(ValidCardPassword("Example7-setup"), "DWS accepts a suitable operator password")
+    Check(not ValidCardPassword("") And not ValidCardPassword("short7!") And not ValidCardPassword("Example7"), "no empty or insufficient DWS password")
     profile.address = "192.168.1.11"
-    Check(not ValidConfig(config), "card cannot claim another player's IP")
+    Check(not ValidStaticIPv4(profile, config.players, config.card_player_id), "card cannot claim another player's IP")
     profile.address = "192.168.1.12"
     profile.broadcast = "192.168.2.255"
-    Check(not ValidConfig(config), "wrong broadcast rejected")
+    Check(not ValidStaticIPv4(profile, config.players, config.card_player_id), "wrong broadcast rejected")
     profile.broadcast = "192.168.1.255"
     schedule.off = "25:00"
     Check(not ValidConfig(config), "invalid stop time rejected")
