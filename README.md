@@ -1,6 +1,6 @@
 # StartWebcast SyncPlayer
 
-StartWebcast SyncPlayer **0.2.4** runs from microSD on BrightSign XD236. It offers standalone playback and native PTP/SyncManager group playback. Three-player hardware acceptance is pending.
+StartWebcast SyncPlayer runs from microSD on BrightSign XD236. It supports standalone playback and native PTP/SyncManager group playback. See the hardware checklist for output alignment measurements.
 
 | Screen | Role | Primary Ethernet address |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Use the same release ZIP on all three players. [SD quick start](docs/SD-QUICK-ST
 
 ## Prepared content cards
 
-Use [the content card guide](docs/CONTENT-CARDS.md) to prepare or copy dedicated A/B/C cards that play a matched 4K25 set with a holding image. The card build preserves the MP4s, shows the holding image during startup and sends audio from the leader over HDMI. It commissions each player's static IPv4 address and runs a daily 07:00–21:00 Sydney HDMI-CEC schedule. Each card can also commission password-protected BrightSign diagnostics at boot.
+Prepare dedicated A/B/C cards for a matched 4K25 set. Each card commissions its static IPv4 address, shows a startup identification screen and enables HDMI audio. The daily 07:00–21:00 Sydney schedule uses HDMI-CEC to control the displays. Each card can also commission password-protected BrightSign diagnostics at boot. [Content Card Guide](docs/CONTENT-CARDS.md)
 
 Provisioned cards host the full-width purple management console on HTTPS port 8080. The [operator and API guide](docs/SUITE.md) covers uploads, the library, monitoring, HDMI/audio, clock and NTP, Standalone mode, group PTP settings, source layers and sACN/Art-Net controls.
 
@@ -37,7 +37,7 @@ npm exec --yes --package=brighterscript@0.73.8 -- bsc --no-project --files src/a
 node --test tests/desktop/*.test.js
 ```
 
-The presentation-card console includes native playback controls, group membership, Sydney display scheduling, HDMI-CEC and screen snapshots. See the operator guide for the console and the update guide for signed local and GitHub app updates. [Console Guide](docs/SUITE.md) · [App Updates](docs/UPDATES.md)
+The console includes native playback controls, group membership, live player snapshots, system status and a timed IDENT overlay. The lower layer accepts MP4, SRT, RTSP and webpages. Use a separate HTML5 page for the upper layer. [Console Guide](docs/SUITE.md) · [App Updates](docs/UPDATES.md)
 
 ## Configuration
 

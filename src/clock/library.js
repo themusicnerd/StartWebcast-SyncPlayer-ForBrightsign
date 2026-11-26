@@ -22,13 +22,16 @@ class RequestError extends Error {
 
 function safeName(raw, members) {
   if (typeof raw !== 'string') throw new RequestError(400, 'Provide the MP4 file name.');
-  const match = /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})_([a-z])\.mp4$/iu.exec(raw.normalize('NFC'));
-  if (!match || match[1] !== match[1].trim() || !members.includes(match[2].toUpperCase())) {
+  const filename = raw.normalize('NFC');
+  const suffixed = /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})[_. -]([a-z])\.mp4$/iu.exec(filename);
+  const plain = !suffixed && members.length === 1 ? /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89})\.mp4$/iu.exec(filename) : null;
+  const name = (suffixed || plain)?.[1];
+  const target = suffixed?.[2].toUpperCase() || members[0];
+  if (!name || name !== name.trim() || !members.includes(target)) {
     throw new RequestError(400, `Name the file like Welcome_${members[0]}.mp4 using one of ${members.join(', ')}.`);
   }
-  const [, name, target] = match;
   const id = createHash('sha256').update(name.toLocaleLowerCase('en-AU')).digest('hex').slice(0, 24);
-  return { id, name, target: target.toUpperCase() };
+  return { id, name, target };
 }
 
 async function atomicJson(path, value) {
@@ -236,18 +239,24 @@ class Library {
 
   async remove(id, revision, protectedDigests, activeRevision) {
     return this.transaction((next) => {
-      const { set, stored } = this.get(id, revision === 'draft' ? undefined : revision);
+      const entireSet = revision === 'all';
+      const { set, stored } = this.get(id, revision === 'draft' || entireSet ? undefined : revision);
+      if (entireSet && set.revisions.some(({ revision: key }) => key === activeRevision || key === next.dispatch?.revision)) {
+        throw new RequestError(409, 'Select Another Source and Clear Distribution Before Deleting This Set.');
+      }
       if (revision === activeRevision || next.dispatch?.revision === revision) throw new RequestError(409, 'Stop using that revision and clear distribution before deleting it.');
       const updated = next.sets[id];
-      const removed = revision === 'draft' ? set.draft : stored?.files;
-      if (!removed) throw new RequestError(404, 'That revision does not exist.');
-      if (Object.values(removed).some(({ digest }) => protectedDigests.includes(digest))) {
+      const removed = entireSet ? [set.draft, ...set.revisions.map(({ files }) => files)] :
+        [revision === 'draft' ? set.draft : stored?.files];
+      if (!removed[0]) throw new RequestError(404, 'That revision does not exist.');
+      const digests = [...new Set(removed.flatMap((files) => Object.values(files).map(({ digest }) => digest)))];
+      if (digests.some((digest) => protectedDigests.includes(digest))) {
         throw new RequestError(409, 'The selected media uses this file. Select another source first.');
       }
       if (revision === 'draft') updated.draft = {};
-      else updated.revisions = updated.revisions.filter((entry) => entry.revision !== revision);
-      if (!updated.revisions.length && !Object.keys(updated.draft).length) delete next.sets[id];
-      return Object.values(removed).map(({ digest }) => digest);
+      else if (!entireSet) updated.revisions = updated.revisions.filter((entry) => entry.revision !== revision);
+      if (entireSet || (!updated.revisions.length && !Object.keys(updated.draft).length)) delete next.sets[id];
+      return digests;
     });
   }
 

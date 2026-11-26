@@ -10,13 +10,13 @@
 </head>
 <body>
   <header class="masthead">
-    <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><img src="/startwebcast.png" alt="" width="38" height="27">StartWebcast SyncPlayer</a>
-    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#sources">Sources &amp; Layers</a><a href="#library">Media Library</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
-    <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button></div>
+    <a class="brand" href="https://www.startwebcast.com/" target="_blank" rel="noopener noreferrer"><span class="brand-mark"><img src="/startwebcast.png" alt="" width="38" height="27"></span>StartWebcast SyncPlayer</a>
+    <nav aria-label="Player Console"><a href="#overview" aria-current="location">Overview</a><a href="#sources">Sources &amp; Layers</a><a href="#library">Lower Layer Media Library</a><a href="#settings">Settings</a><a href="#lighting">Lighting</a><a href="#updates">Updates</a><a href="#activity">Activity</a><a href="#help">Help</a></nav>
+    <div class="player-tools" aria-label="Local Player and Display Controls"><span class="status-pill" id="connection">Connecting</span><span class="status-pill" id="tv-power" role="status" title="HDMI-Reported Display Power">TV Unknown</span><button id="cec-on" type="button" class="secondary" aria-label="Power On This Display" disabled>Power On</button><button id="cec-standby" type="button" class="secondary" aria-label="Put This Display in Standby" disabled>Standby</button><button id="snapshot" type="button" class="secondary" disabled>Snapshot</button><button id="ident" type="button" class="secondary" aria-pressed="false" disabled>IDENT</button></div>
   </header>
   <main>
-    <section id="overview" aria-labelledby="overview-title" class="section">
-      <div class="section-heading"><div><h1 id="overview-title">Player Overview</h1><p id="identity">Reading player status…</p></div><button id="refresh" class="secondary" type="button">Refresh Status</button></div>
+    <section id="overview" aria-label="Overview" class="section">
+      <div class="section-heading"><p id="identity">Reading Player Status…</p><button id="refresh" class="secondary" type="button">Refresh Status</button></div>
       <div class="grid grid-thirds">
         <article class="panel playback">
           <div class="panel-heading"><h2>Playback</h2><span class="status-pill" id="playback-state">Starting</span></div>
@@ -26,21 +26,40 @@
           <p class="muted" id="transport-help"></p>
           <p class="feedback" id="playback-error"></p>
         </article>
-        <article class="panel"><div class="panel-heading"><h2>Players</h2><span class="status-pill" id="sync-summary">Waiting for Players</span></div><div class="player-grid" id="players"></div><p id="storage" class="muted">Reading SD card…</p></article>
+        <article class="panel" id="players-panel">
+          <div class="panel-heading"><h2>Players</h2><span class="status-pill" id="sync-summary">Waiting for Players</span></div>
+          <div class="actions"><button id="refresh-previews" class="secondary" type="button">Refresh Previews</button><button id="edit-player-layout" class="secondary" type="button" aria-expanded="false" aria-controls="player-layout-form">Edit Layout</button></div>
+          <form id="player-layout-form" class="stack" hidden>
+            <div class="form-row"><label>Rows<select name="rows"><option>1</option><option>2</option><option>3</option></select></label><label>Columns<select name="columns"><option>1</option><option>2</option><option>3</option></select></label></div>
+            <div id="layout-cells" class="player-grid"></div>
+            <div class="actions"><button type="submit">Save Layout</button><button id="cancel-layout" class="secondary" type="button">Cancel</button></div>
+          </form>
+          <div class="player-grid" id="players"></div><p id="storage" class="muted">Reading SD Card…</p>
+        </article>
         <article class="panel"><div class="panel-heading"><h2>Group Membership</h2></div><div id="group-members"><p class="muted">Reading the configured group…</p></div>
           <form id="member-form" class="stack" hidden><div class="form-row"><label class="grow">Available Player<select name="player" required></select></label><button type="submit">Add Player</button></div><p id="member-help" class="muted"></p></form>
         </article>
       </div>
+      <article class="panel device-status" aria-labelledby="device-status-title">
+        <div class="panel-heading"><h2 id="device-status-title">Device Status</h2></div>
+        <dl id="device-stats" class="device-stats"><div><dt>Status</dt><dd>Waiting for Player</dd></div></dl>
+      </article>
     </section>
 
     <div class="grid grid-halves work-grid">
       <section class="panel section" id="sources" aria-labelledby="sources-title">
         <div class="panel-heading"><h2 id="sources-title">Sources &amp; Layers</h2></div>
+        <div class="preview-pair">
+        <figure class="layer-preview">
+          <figcaption id="output-preview-label">Display Preview</figcaption>
+          <div id="layer-preview-frame" class="preview-frame"><img id="layer-preview" alt="Local Display Capture" width="160" height="90" hidden><span id="layer-preview-empty">Waiting for Preview</span></div>
+        </figure>
         <figure class="layer-preview">
           <figcaption>Display Layout</figcaption>
           <div class="layout" aria-label="Lower-Layer Window and Full-Screen Upper Overlay"><div id="layout-rect"></div><div id="layout-overlay" hidden></div></div>
           <ul class="layer-key"><li class="base-key">Lower-Layer Window</li><li class="overlay-key" id="overlay-key" hidden>Full-Screen HTML5 Overlay</li></ul>
         </figure>
+        </div>
         <div class="layer-controls">
           <section class="layer-control upper-layer" aria-labelledby="upper-layer-title">
             <div class="layer-heading"><h3 id="upper-layer-title">Upper Layer <span>HTML5 Overlay</span></h3><span class="status-pill" id="overlay-state">Off</span></div>
@@ -52,12 +71,17 @@
           <section class="layer-control base-layer" aria-labelledby="base-layer-title">
             <div class="layer-heading"><h3 id="base-layer-title">Lower Layer <span>Base Source</span></h3><span id="base-state" class="status-pill">Reading Source</span></div>
             <p id="base-source-name" class="muted"></p>
-            <p>Play one source in this layer. Choose the card presentation, an MP4, an SRT feed, or a webpage.</p>
+            <p>Play one source in this layer. Choose the card presentation, an MP4, an SRT or RTSP feed, or a webpage.</p>
             <p class="muted" id="startup-source" hidden></p>
-            <div class="actions layer-actions"><button id="follow-group" type="button" class="secondary" hidden>Follow Group</button><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in Media Library</a></div>
+            <div class="actions layer-actions"><button id="follow-group" type="button" class="secondary" hidden>Follow Group</button><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in the Lower Layer Media Library</a></div>
+            <form id="saved-source-form" class="stack">
+              <h4>Saved Sources</h4>
+              <div class="form-row"><label class="grow">Source<select name="id" required><option value="">No Saved Sources</option></select></label><button type="submit" disabled>Play Selected</button><button type="button" id="remove-source" class="secondary" disabled>Remove</button></div>
+            </form>
             <form id="source-form" class="stack">
-              <h4>Live or Web Source</h4>
-              <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" aria-describedby="source-help" required></label><button type="submit">Play Source</button></div>
+              <h4>Add or Play a Source</h4>
+              <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="rtsp">RTSP Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" autocomplete="off" aria-describedby="source-help" required></label></div>
+              <div class="form-row"><label class="grow">Name for Saved Source<input name="name" maxlength="80" autocomplete="off"></label><button type="submit" id="save-source" class="secondary">Save Source</button><button type="submit">Play URL</button></div>
               <p id="source-help" class="muted"></p>
             </form>
             <form id="window-form" class="stack">
@@ -67,9 +91,10 @@
         </div>
       </section>
       <section class="panel section" id="library" aria-labelledby="library-title">
-        <div class="panel-heading"><h2 id="library-title">Media Library</h2><span id="library-count" class="muted"></span></div>
+        <div class="panel-heading"><h2 id="library-title">Lower Layer Media Library</h2><span id="library-count" class="muted"></span></div>
         <form id="upload">
           <label class="drop" id="drop" for="media-files"><strong>Drop MP4 Files or Choose Files</strong><span>Use names like Welcome_A.mp4, Welcome_B.mp4 and Welcome_C.mp4.</span><input id="media-files" name="files" type="file" multiple accept="video/mp4,.mp4"></label>
+          <ul id="upload-plan" aria-label="Detected File Assignments" class="upload-plan" hidden></ul>
           <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace Draft Files</label></div>
           <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
         </form>
@@ -81,7 +106,17 @@
     <section class="section" id="settings" aria-labelledby="settings-title">
       <div class="section-heading"><h2 id="settings-title">Device Settings</h2></div>
       <div class="grid grid-quarters">
-        <article class="panel"><form id="av-form" class="stack"><h3>HDMI &amp; Audio</h3><label>Output Resolution<select name="output"><option value="3840x2160x50p">3840 × 2160 · 50 Hz</option><option value="1920x1080x50p">1920 × 1080 · 50 Hz</option></select></label><label>Output Rotation<select name="rotation"><option value="0">0°</option><option value="90">90° Clockwise</option><option value="180">180°</option><option value="270">270° Clockwise</option></select></label><label class="check"><input type="checkbox" name="audioenabled" checked> HDMI Audio</label><div class="form-row"><label class="grow">Volume <output id="volume-label"></output><input type="range" name="volume" min="0" max="100"></label><label class="check"><input type="checkbox" name="muted"> Mute</label></div><p id="audio-owner" class="muted"></p><button type="submit">Save HDMI &amp; Audio</button></form></article>
+        <article class="panel"><form id="network-form" class="stack">
+          <h3>Ethernet</h3><p id="network-current">Reading Ethernet Settings…</p>
+          <label>IP Mode<select name="mode"><option value="static">Static</option><option value="dhcp">DHCP</option></select></label>
+          <fieldset id="static-network" class="stack"><legend>Static IPv4</legend>
+            <label>IP Address<input name="address" inputmode="decimal" required></label><label>Subnet Mask<input name="netmask" inputmode="decimal" required></label>
+            <label>Gateway<input name="gateway" inputmode="decimal"></label><label>DNS Servers<input name="dns" placeholder="192.168.1.1, 1.1.1.1"></label>
+          </fieldset>
+          <label class="check" id="network-reserve" hidden><input type="checkbox" name="reserved"> Group IP Reserved</label>
+          <p id="network-note"></p><button type="submit" disabled>Apply Ethernet Settings</button>
+        </form></article>
+        <article class="panel"><form id="av-form" class="stack"><h3>HDMI &amp; Audio</h3><label>Output Resolution<select name="output"><option value="3840x2160x50p">3840 × 2160 · 50 Hz</option><option value="1920x1080x50p">1920 × 1080 · 50 Hz</option></select></label><label>Output Rotation<select name="rotation"><option value="0">0°</option><option value="90">90° Clockwise</option><option value="180">180°</option><option value="270">270° Clockwise</option></select></label><label class="check"><input type="checkbox" name="audioenabled" checked> HDMI Audio</label><label class="check"><input type="checkbox" name="cecremote"> CEC Remote Playback</label><div class="form-row"><label class="grow">Volume <output id="volume-label"></output><input type="range" name="volume" min="0" max="100"></label><label class="check"><input type="checkbox" name="muted"> Mute</label></div><p id="audio-owner" class="muted"></p><button type="submit">Save HDMI &amp; Audio</button></form></article>
         <article class="panel"><form id="role-form" class="stack"><h3>Playback Mode &amp; PTP</h3><div class="form-row"><label class="grow">Mode<select name="role"><option value="leader">Leader</option><option value="follower">Follower</option><option value="standalone">Standalone</option></select></label><label class="grow">Leader Player<select name="leader"></select></label></div><div class="form-row"><label class="grow">Sync Group Name<input name="group" type="text" maxlength="48" pattern="[a-z0-9\-]+" required></label><label>PTP Domain<input name="domain" type="number" min="0" max="127" required></label></div><p id="ptp-use" class="muted">Reading PTP announcements…</p><button type="submit">Save Mode &amp; PTP</button></form></article>
         <article class="panel"><h3>Clock &amp; Schedule</h3><p><time id="current">Reading Sydney time…</time></p><div class="actions"><button type="button" class="secondary" id="computer">Use This Computer’s Time</button></div><form id="manual" class="stack"><div class="form-row"><label class="grow">Sydney Date and Time<input id="sydney" type="datetime-local" required></label><button id="save" type="submit" class="secondary">Set Time</button></div></form><form id="schedule-form" class="stack"><label class="check"><input type="checkbox" name="enabled" checked> Enable Display Schedule</label><div class="form-row"><label>Daily Wake<input name="on" type="time" required></label><label>Daily Standby<input name="off" type="time" required></label><button type="submit" class="secondary">Save Schedule</button></div><p class="muted" id="schedule-help"></p></form></article>
         <article class="panel"><form id="ntp-form" class="stack"><h3>Network Time</h3><label>NTP Server<input type="text" name="ntp" spellcheck="false" placeholder="0.au.pool.ntp.org"></label><label>Update Interval (Seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
@@ -98,11 +133,12 @@
     </section>
 
     <section class="section" id="updates" aria-labelledby="updates-title">
-      <div class="section-heading"><h2 id="updates-title">App Updates</h2><span class="status-pill" id="update-status" role="status">Checking Version</span></div>
-      <div class="grid grid-thirds">
+      <div class="section-heading"><h2 id="updates-title">Updates</h2><span class="status-pill" id="update-status" role="status">Checking Version</span></div>
+      <div class="grid grid-quarters">
         <article class="panel"><form id="update-file" class="stack"><h3>Local Package</h3><label>Signed Update Package<input type="file" name="package" accept=".swu,application/octet-stream" required></label><button type="submit">Stage File</button></form></article>
         <article class="panel"><form id="update-github" class="stack"><h3>GitHub Source</h3><label>Repository<input name="repository" placeholder="owner/repository" spellcheck="false" required></label><label>Branch<input name="branch" placeholder="main" spellcheck="false" required></label><label>Access Token for Private Repositories<input name="token" type="password" autocomplete="off" maxlength="255"></label><div class="actions"><button type="submit" class="secondary">Save Source</button><button type="submit" id="update-download">Fetch and Stage</button><button type="submit" id="update-browser" class="secondary">Fetch Using Browser</button></div></form></article>
         <article class="panel"><div class="stack"><h3>Installation</h3><p id="update-detail" class="muted">Checking the update slot…</p><div class="actions"><button id="update-activate" type="button" disabled>Install and Restart</button><button id="update-rollback" type="button" class="secondary" disabled>Roll Back and Restart</button></div></div></article>
+        <article class="panel"><div class="stack"><h3>BrightSignOS</h3><p id="firmware-version" class="muted">Reading Installed Version…</p><p>Sign in to the Diagnostic Web Server. Open Advanced, then BrightSignOS Update.</p><a id="os-update" target="_blank" rel="noopener noreferrer">Open BrightSign Updater</a></div></article>
       </div>
     </section>
 
@@ -132,11 +168,17 @@
             <li>Select <strong>Add Player</strong>.</li>
           </ol><p>Prepare the follower’s card and peer credentials before you add it.</p></details>
           <details><summary>Upload and Distribute a Clip</summary><ol>
-            <li>Open <a href="#library">Media Library</a> on the leader.</li>
+            <li>Open <a href="#library">Lower Layer Media Library</a> on the leader.</li>
             <li>Use one MP4 for each group member. For example, use <code>Welcome_A.mp4</code>.</li>
             <li>Select the MP4 files.</li><li>Select <strong>Upload</strong>.</li>
             <li>Select <strong>Distribute</strong> on the saved version.</li>
             <li>Wait for all group members to finish.</li><li>Select <strong>Play Group</strong>.</li>
+          </ol></details>
+          <details><summary>Identify a Player and Check its Status</summary><ol>
+            <li>Select <strong>IDENT</strong> to show player and configuration details on its screen for 10 seconds.</li>
+            <li>Select <strong>IDENT</strong> again to close it.</li>
+            <li>Read <strong>Device Status</strong> for local metrics and the HDMI screen ID.</li>
+            <li>Select <strong>Edit Layout</strong> to arrange the player previews for the group.</li>
           </ol></details>
           <details><summary>Set the Display and Clock</summary><ol>
             <li>Select <strong>Power On</strong> or <strong>Standby</strong> in the top bar.</li>
@@ -160,7 +202,7 @@
           <details><summary>Set Sources, Layers and Lighting</summary><ol>
             <li>Open <a href="#sources">Sources &amp; Layers</a>.</li>
             <li>Read the current source under <strong>Lower Layer</strong>.</li>
-            <li>Select <strong>Play Presentation</strong> or choose an MP4 from <strong>Media Library</strong>.</li>
+            <li>Select <strong>Play Presentation</strong> or choose an MP4 from <strong>Lower Layer Media Library</strong>.</li>
             <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
             <li>Enter the URL. Select <strong>Play Source</strong>.</li>
             <li>The player opens the last saved source at startup.</li>
@@ -209,6 +251,9 @@
               <dt>PUT <code>/group/audio/B</code></dt><dd>Send <code>{"enabled":true}</code> to enable HDMI audio on Player B.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
+              <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds. Send <code>{"seconds":0}</code> to hide it, or set a duration of up to 30 seconds.</dd>
+              <dt>GET <code>/network</code></dt><dd>Read the Ethernet mode, address, mask, gateway and DNS settings.</dd>
+              <dt>GET <code>/sources</code></dt><dd>List saved SRT feeds, RTSP feeds and webpages. Send a saved ID to <code>POST /source</code> to start it.</dd>
               <dt>GET <code>/updates</code></dt><dd>Read the running version and GitHub source.</dd>
             </dl>
           </details>

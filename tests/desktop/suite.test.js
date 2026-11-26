@@ -9,7 +9,7 @@ const { Readable } = require('node:stream');
 const test = require('node:test');
 const { Library, safeName } = require('../../src/clock/library');
 const { announceDomain } = require('../../src/clock/peers');
-const { decoderTiming, sanitiseSettings, sourceUrl, Suite } = require('../../src/clock/suite');
+const { cpuSample, decoderTiming, networkProfile, playerLayout, sanitiseSettings, sourceUrl, Suite } = require('../../src/clock/suite');
 
 function fixture(path, colour, frames = 25) {
   execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', `color=${colour}:s=320x180:r=25`,
@@ -18,6 +18,7 @@ function fixture(path, colour, frames = 25) {
 
 test('validates file names, mode, window, clock server and source settings', () => {
   assert.equal(safeName('Welcome_Christmas_2026_b.MP4', ['A', 'B']).target, 'B');
+  assert.equal(safeName('Welcome-C.MP4', ['A', 'B', 'C']).id, safeName('Welcome.A.mp4', ['A', 'B', 'C']).id);
   assert.throws(() => safeName('../Welcome_A.mp4', ['A']), /Name the file/);
   const current = { role: 'leader', leader: 'A' };
   assert.deepEqual(sanitiseSettings({ role: 'standalone', domain: 42, ntp: '192.168.1.1' }, ['A', 'B'], current, 'A'),
@@ -26,6 +27,21 @@ test('validates file names, mode, window, clock server and source settings', () 
   assert.throws(() => sanitiseSettings({ rect: { x: 80, y: 0, width: 30, height: 40 } }, ['A', 'B'], current, 'A'), /inside the display/);
   assert.throws(() => sourceUrl('file:/sd:/autorun.brs', 'web'), /HTTP or HTTPS/);
   assert.equal(sourceUrl('srt://0.0.0.0:9000?mode=listener', 'srt'), 'srt://0.0.0.0:9000?mode=listener');
+  assert.equal(sourceUrl('rtsp://test:example@camera:554/live', 'rtsp'), 'rtsp://test:example@camera:554/live');
+  assert.throws(() => sourceUrl('rtsps://camera/live', 'rtsp'), /rtsp:\/\//);
+});
+
+test('validates static network settings, layout slots and aggregate CPU samples', () => {
+  const config = { mode: 'static', address: '192.168.1.37', netmask: '255.255.255.224', gateway: '192.168.1.33', dns: ['192.168.1.33'] };
+  assert.deepEqual(networkProfile(config), { ...config, broadcast: '192.168.1.63' });
+  assert.deepEqual(networkProfile({ mode: 'dhcp', address: config.address }), { mode: 'dhcp' });
+  assert.throws(() => networkProfile({ ...config, netmask: '255.255.254.224' }), /Contiguous/);
+  assert.throws(() => networkProfile({ ...config, gateway: '192.168.1.1' }), /Same Subnet/);
+  assert.throws(() => networkProfile({ ...config, address: '192.168.1.63' }), /Usable Host/);
+  const layout = { rows: 2, columns: 2, cells: ['B', null, 'C', 'A'] };
+  assert.deepEqual(playerLayout(layout, 'ABC'.split('')), layout);
+  assert.throws(() => playerLayout({ ...layout, cells: ['B', 'B', 'C', 'A'] }, 'ABC'.split('')), /Each Player Used Once/);
+  assert.deepEqual(cpuSample('cpu  16 2 32 140 10 3 6 1 300 500\ncpu0 12 11 13 14'), { total: 210, idle: 150 });
 });
 
 test('only accepts PTPv2 Announce packets with a valid domain and message length', () => {
@@ -60,10 +76,16 @@ test('streams drafts, rejects mismatched members and durably replaces only compl
     await manager.distribute(draft.id, revision);
     assert.equal(manager.assignment('B').revision, revision);
     await assert.rejects(manager.remove(draft.id, revision, []), /clear distribution/);
+    await assert.rejects(manager.remove(draft.id, 'all', []), /Clear Distribution/);
     const reopened = new Library(join(root, 'library'), ['A', 'B'], async () => true);
     await reopened.init();
     assert.equal(reopened.list()[0].revisions[0].revision, revision);
     assert.equal(reopened.assignment('A').revision, revision);
+    await reopened.transaction((next) => { next.dispatch = null; });
+    await assert.rejects(reopened.remove(draft.id, 'all', [], revision), /Clear Distribution/);
+    const removed = await reopened.remove(draft.id, 'all', []);
+    assert.equal(removed.length, 2);
+    assert.deepEqual(reopened.list(), []);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

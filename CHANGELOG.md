@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.16
+
+- Decode the BrightSign clock format on the IDENT screen and fit all diagnostics in portrait mode.
+- Read Linux thermal sensors when the BrightSign temperature API provides no readings.
+- Add IDENT, Ethernet and saved source requests to the console help.
+
+## 0.2.15
+
+- Add startup diagnostics and a timed IDENT overlay to the console and API.
+- Show low-resolution display previews and share a Players layout of up to three rows and three columns.
+- Add a saved lower-layer source list, native RTSP input and an opt-in CEC playback remote.
+- Show detected player assignments before upload. Delete uploaded sets from the Lower Layer Media Library.
+- Add Ethernet mode and static IPv4 settings, plus CPU, RAM, SD storage, temperature and HDMI screen identity.
+- Link to the native BrightSignOS updater.
+
 ## 0.2.14
 
 - Restore SRT feeds and webpages on boot. Retry an unavailable live source with backoff.

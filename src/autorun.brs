@@ -72,24 +72,31 @@ Sub RunPlayback(port As Object)
     End If
     If cardId <> invalid Then m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
 
-    address = WaitForAddress(network, config.players, port)
+    address = WaitForAddress(network, config.players, cardId, port)
     If address = "" Then Return
 
     m.playerId = config.players[address]
+    If cardId <> invalid Then
+        If m.playerId <> invalid And cardId <> m.playerId Then
+            LogEvent("WRONG_PLAYER_CARD", {card_id: cardId, ip: address})
+            Return
+        End If
+        m.playerId = cardId
+    End If
     targetMode = "1920x1080x60p"
     mediaName = "FrameCounter_" + m.playerId + ".mp4"
     contentId = "counter-r1"
     If cardId <> invalid Then
-        If cardId <> m.playerId Then
-            LogEvent("WRONG_PLAYER_CARD", {card_id: cardId, ip: address})
-            Return
-        End If
         targetMode = config.output_mode
         mediaName = "Presentation_" + m.playerId + ".mp4"
         contentId = "presentation-r1"
     End If
     mediaPath = root + "media/" + mediaName
     panel = NewPanel(config, device, mode, network, clock, root, address, targetMode, mediaPath, contentId, port)
+    panel.expectedAddress = ""
+    For Each ip In config.players
+        If config.players[ip] = m.playerId Then panel.expectedAddress = ip
+    End For
     m.panel = panel
     m.clock = clock
     If scheduled Then ConfigureDefaultNtp(panel)
@@ -98,6 +105,10 @@ Sub RunPlayback(port As Object)
             m.clockWeb = CreateObject("roNodeJs", m.runtime + "clock/server.js", {message_port: port, arguments: [address, m.slot]})
             If m.clockWeb = invalid Then LogEvent("WEB_INTERFACE_UNAVAILABLE", {})
         End If
+    End If
+    If panel.role <> "standalone" And panel.address <> panel.expectedAddress Then
+        panel.error = "The Ethernet IP Does Not Match This Player’s Group Address. Open Network Settings to Restore It."
+        Return
     End If
     leader = (panel.role = "leader")
     targetMode = panel.settings.output
@@ -188,7 +199,12 @@ Sub RunPlayback(port As Object)
 
     If scheduled Then
         panel.cec = CreateObject("roCecInterface")
-        If panel.cec = invalid Then LogEvent("CEC_UNAVAILABLE", {})
+        If panel.cec = invalid Then
+            LogEvent("CEC_UNAVAILABLE", {})
+        Else
+            panel.cec.SetPort(port)
+        End If
+        ShowStartupCard(panel)
         If m.holding <> invalid Then m.holding.Hide()
     End If
     panel.readyAt = UpTime(0) + 10
@@ -205,6 +221,8 @@ Sub RunPlayback(port As Object)
             PanelFollow(panel, event)
         Else If eventType = "roVideoEvent" Then
             PanelVideoEvent(panel, event.GetInt())
+        Else If eventType = "roCecRxFrameEvent" Then
+            PanelCecInput(panel, event)
         End If
     End While
 End Sub
@@ -241,7 +259,7 @@ Sub HandleClockWeb(event As Dynamic)
 End Sub
 
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
-    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, audiorevision: "", presentationtitle: "Presentation", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, cecremote: false, audiorevision: "", presentationtitle: "Presentation", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
     title = ReadAsciiFile(root + "presentation-title.txt").Trim()
     If Len(title) > 0 And Len(title) <= 100 Then settings.presentationtitle = title
     If m.playerId = config.leader_id Then settings.role = "leader"
@@ -276,6 +294,12 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel.memberUntil = 0
     panel.telemetryAt = 0
     panel.cecRequest = ""
+    panel.cecAt = -1
+    panel.device = device
+    panel.networkNext = invalid
+    panel.networkResult = ""
+    panel.startup = invalid
+    panel.identUntil = 0
     panel.retryAt = 0
     panel.retryDelay = 3
     panel.mediaCycle = ""
@@ -302,13 +326,32 @@ Function PanelStatus(panel As Object) As Object
     data.localoverride = panel.localOverride
     If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
+    data.cecremote = panel.settings.cecremote
+    data.ident = panel.startup <> invalid
+    data.network = PanelNetwork(panel.network.GetCurrentConfig())
+    data.networkresult = panel.networkResult
+    If panel.scheduled Then
+        data.temperature = panel.device.GetTemperature()
+    End If
     data.cecrequest = panel.cecRequest
     data.tvpower = "unknown"
     hdmi = panel.mode.GetHdmiOutputStatus()
+    data.screen = {connected: false}
     If Type(hdmi) = "roAssociativeArray" Then
+        data.screen.connected = hdmi.output_present = true
         If hdmi.output_present = true And BooleanValue(hdmi.output_powered) Then
             data.tvpower = "off"
             If hdmi.output_powered Then data.tvpower = "on"
+        End If
+    End If
+    If data.screen.connected Then
+        edid = panel.mode.GetEdidIdentity(true)
+        If Type(edid) = "roAssociativeArray" Then
+            data.screen.manufacturer = edid.manufacturer
+            data.screen.name = edid.monitor_name
+            data.screen.product = edid.product
+            data.screen.serial = edid.serial_number_string
+            If not TextValue(data.screen.serial) Or data.screen.serial = "" Then data.screen.serial = edid.serial_number
         End If
     End If
     playback = PanelPlayback(panel)
@@ -329,12 +372,65 @@ Function PanelStatus(panel As Object) As Object
     Return data
 End Function
 
+Function PanelNetwork(data As Dynamic) As Object
+    If Type(data) <> "roAssociativeArray" Then Return {}
+    mode = "static"
+    If data.dhcp = true Then mode = "dhcp"
+    Return {mode: mode, address: data.ip4_address, netmask: data.ip4_netmask, broadcast: data.ip4_broadcast, gateway: data.ip4_gateway, dns: data.dns_servers, mac: data.ethernet_mac, hostname: data.hostname, mdns: data.mdns_hostname, link: data.link}
+End Function
+
+Function ApplyPanelNetwork(panel As Object, profile As Object) As Boolean
+    network = panel.network
+    If profile.mode = "dhcp" Then
+        If not network.SetDHCP() Then Return false
+        If not network.SetDNSServers([]) Then Return false
+    Else
+        If not network.ResetInterfaceSettings() Then Return false
+        If not network.SetIP4Address(profile.address) Or not network.SetIP4Netmask(profile.netmask) Then Return false
+        If not network.SetIP4Broadcast(profile.broadcast) Then Return false
+        If TextValue(profile.gateway) And profile.gateway <> "" Then
+            If not network.SetIP4Gateway(profile.gateway) Then Return false
+        End If
+        dns = profile.dns
+        If Type(dns) <> "roArray" Then dns = []
+        If not network.SetDNSServers(dns) Then Return false
+    End If
+    If not network.SetTimeServer(panel.settings.ntp) Then Return false
+    If not network.SetTimeServerIntervalSeconds(panel.settings.interval) Then Return false
+    Return network.Apply()
+End Function
+
+Sub CommitPanelNetwork(panel As Object)
+    previous = PanelNetwork(panel.network.GetCurrentConfig())
+    profile = panel.networkNext
+    panel.networkNext = invalid
+    If not TextValue(previous.address) Or previous.address = "" Then Return
+    accepted = ApplyPanelNetwork(panel, profile)
+    If accepted Then
+        For attempt = 1 To 30
+            current = PanelNetwork(panel.network.GetCurrentConfig())
+            If current.link = true And current.mode = profile.mode And TextValue(current.address) And current.address <> "" Then
+                correct = profile.mode = "dhcp" Or (current.address = profile.address And current.netmask = profile.netmask)
+                If correct And (panel.role = "standalone" Or current.address = panel.expectedAddress) Then
+                    LogEvent("ETHERNET_SETTINGS_APPLIED", {address: current.address, mode: profile.mode})
+                    RebootSystem()
+                    Return
+                End If
+            End If
+            Sleep(1000)
+        End For
+    End If
+    panel.networkResult = "The Ethernet Settings Could Not Be Verified. Previous Settings Restored."
+    If not ApplyPanelNetwork(panel, previous) Then panel.networkResult = "Ethernet Settings Failed. Restore the Network From the Diagnostic Web Server or the SD Card."
+    LogEvent("ETHERNET_SETTINGS_REJECTED", {restored: panel.networkResult})
+End Sub
+
 Function PanelGroupMedia(panel As Object) As Boolean
     Return panel.role <> "standalone" And (panel.source = "built-in" Or panel.source = "group")
 End Function
 
 Function PanelFileMedia(panel As Object) As Boolean
-    Return panel.source <> "web" And panel.source <> "srt"
+    Return not PanelLiveSource(panel)
 End Function
 
 Function PanelPlayback(panel As Object) As Object
@@ -447,8 +543,8 @@ End Function
 Sub RestoreSelection(panel As Object)
     selected = panel.settings.selection
     If Type(selected) <> "roAssociativeArray" Then Return
-    If (selected.kind = "web" And PanelWebUrl(selected.url)) Or (selected.kind = "srt" And PanelSrtUrl(selected.url)) Then
-        SetLiveSource(panel, selected.kind, selected.url)
+    If (selected.kind = "web" And PanelWebUrl(selected.url)) Or (selected.kind = "srt" And PanelSrtUrl(selected.url)) Or (selected.kind = "rtsp" And PanelRtspUrl(selected.url)) Then
+        SetLiveSource(panel, selected.kind, selected.url, selected.name)
         panel.localOverride = panel.role = "follower"
         Return
     End If
@@ -498,14 +594,21 @@ Function PanelSrtUrl(value As Dynamic) As Boolean
     Return Len(value) <= 1024 And Left(value, 6) = "srt://"
 End Function
 
-Function PanelLiveSource(panel As Object) As Boolean
-    Return panel.source = "web" Or panel.source = "srt"
+Function PanelRtspUrl(value As Dynamic) As Boolean
+    If not TextValue(value) Then Return false
+    Return Len(value) <= 1024 And Left(value, 7) = "rtsp://"
 End Function
 
-Sub SetLiveSource(panel As Object, kind As String, url As String)
+Function PanelLiveSource(panel As Object) As Boolean
+    Return panel.source = "web" Or panel.source = "srt" Or panel.source = "rtsp"
+End Function
+
+Sub SetLiveSource(panel As Object, kind As String, url As String, name As Dynamic)
     panel.source = kind
     panel.name = "Webpage"
     If kind = "srt" Then panel.name = "SRT Feed"
+    If kind = "rtsp" Then panel.name = "RTSP Feed"
+    If TextValue(name) And Len(name) > 0 And Len(name) <= 80 Then panel.name = name
     panel.asset = ""
     panel.revision = ""
     panel.url = url
@@ -514,9 +617,9 @@ End Sub
 Sub RememberLiveSource(panel As Object)
     previous = panel.settings.selection
     If Type(previous) = "roAssociativeArray" Then
-        If previous.kind = panel.source And previous.url = panel.url Then Return
+        If previous.kind = panel.source And previous.url = panel.url And previous.name = panel.name Then Return
     End If
-    panel.settings.selection = {kind: panel.source, url: panel.url}
+    panel.settings.selection = {kind: panel.source, url: panel.url, name: panel.name}
     If not SavePanel(panel, panel.settings) Then
         panel.settings.selection = previous
         panel.error = "The Live Source Started but Its Startup Selection Could Not Be Saved."
@@ -528,6 +631,63 @@ Function HtmlLayer(url As String, bounds As Object, port As Object, rotation As 
     If rotation <> 0 Then options.transform = GraphicsRotation(rotation)
     Return CreateObject("roHtmlWidget", bounds, options)
 End Function
+
+Function ShowStartupCard(panel As Object) As Boolean
+    HideStartupCard(panel)
+    encoding = CreateObject("roUrlTransfer")
+    If encoding = invalid Then Return false
+    data = {player: m.playerId, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp}
+    network = panel.network.GetCurrentConfig()
+    If Type(network) = "roAssociativeArray" And TextValue(network.ethernet_mac) Then data.mac = network.ethernet_mac
+    updater = ParseJson(ReadAsciiFile(panel.root + "updates/github.json"))
+    If Type(updater) = "roAssociativeArray" And TextValue(updater.repository) Then data.repository = updater.repository
+    lighting = ParseJson(ReadAsciiFile(panel.root + "library/lighting.json"))
+    If Type(lighting) = "roAssociativeArray" Then
+        data.lighting = {protocol: lighting.protocol, universe: lighting.universe, channel: lighting.channel, source: lighting.source}
+    End If
+    If panel.clock <> invalid Then
+        If panel.clock.IsValid() Then data.utc = panel.clock.GetUtcDateTime().ToIsoString()
+        result = panel.clock.GetLastNetworkTimeResult()
+        If Type(result) = "roAssociativeArray" Then
+            data.ntpsuccess = result.success_timestamp
+            data.ntperror = result.failure_reason
+        End If
+    End If
+    url = "file:/" + m.runtime + "clock/layer.html?startup=" + encoding.Escape(FormatJson(data))
+    screen = CreateObject("roRectangle", 0, 0, panel.mode.GetResX(), panel.mode.GetResY())
+    panel.startup = HtmlLayer(url, screen, CreateObject("roMessagePort"), panel.settings.rotation)
+    If panel.startup = invalid Then Return false
+    If not panel.startup.Show() Then
+        panel.startup = invalid
+        Return false
+    End If
+    panel.startup.Raise()
+    Return true
+End Function
+
+Sub HideStartupCard(panel As Object)
+    If panel.startup = invalid Then Return
+    panel.startup.Hide()
+    panel.startup = invalid
+    panel.identUntil = 0
+End Sub
+
+Sub PanelCecInput(panel As Object, event As Object)
+    If panel.settings.cecremote <> true Or m.clockWeb = invalid Then Return
+    frame = event.GetByteArray()
+    If frame.Count() < 3 Then Return
+    destination = panel.cec.GetLogicalAddress()
+    ' Accept transport keys addressed to this player by the TV (logical address zero).
+    If destination = 15 Or frame[0] <> destination Or frame[1] <> &h44 Then Return
+    key = frame[2]
+    action = ""
+    If key = &h44 Or key = &h60 Then action = "play"
+    If key = &h46 Or key = &h61 Then action = "pause"
+    If key = &h45 Or key = &h64 Then action = "stop"
+    If action = "" Or UpTime(0) = panel.cecAt Then Return
+    panel.cecAt = UpTime(0)
+    m.clockWeb.PostJsMessage({protocol: "start-syncplayer-cec-v1", action: action})
+End Sub
 
 Function LayerDocument(panel As Object, base As String) As String
     encode = CreateObject("roUrlTransfer")
@@ -627,6 +787,7 @@ End Sub
 
 Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     If not panel.ready Then Return false
+    If panel.identUntil = 0 Then HideStartupCard(panel)
     panel.retryAt = 0
     panel.mediaCycle = ""
     If panel.base <> invalid Then panel.base.Hide()
@@ -640,7 +801,7 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
     If panel.source = "web" Then
         panel.video.StopClear()
         accepted = StartWebLayer(panel)
-    Else If panel.source = "srt" Then
+    Else If panel.source = "srt" Or panel.source = "rtsp" Then
         accepted = panel.video.PlayFile({Url: panel.url})
         If not accepted Then accepted = panel.video.PlayFile(panel.url)
     Else
@@ -665,6 +826,7 @@ Function StartPanel(panel As Object, position = -1 As Integer) As Boolean
         panel.state = "error"
         panel.error = "The native renderer rejected this source."
         If panel.source = "srt" Then panel.error = "The native SRT source was rejected. Check the player SRT extension and the feed URL."
+        If panel.source = "rtsp" Then panel.error = "The native RTSP source was rejected. Check the feed URL and video format."
         ScheduleVideoRetry(panel)
         Return false
     End If
@@ -716,6 +878,7 @@ Sub PanelTick(panel As Object)
         ScheduleVideoRetry(panel)
     End If
     If UpTime(0) < panel.readyAt Then Return
+    If panel.identUntil = 0 Or now >= panel.identUntil Then HideStartupCard(panel)
     If panel.role = "follower" And not panel.localOverride Then Return
     If panel.retryAt > 0 And now >= panel.retryAt Then
         panel.retryAt = 0
@@ -832,9 +995,9 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
         panel.retryDelay = 3
     End If
     If code <> 8 Or (panel.state <> "playing" And panel.state <> "starting") Then Return
-    If panel.source = "srt" Then
+    If panel.source = "srt" Or panel.source = "rtsp" Then
         panel.state = "ended"
-        panel.error = "The SRT stream ended or disconnected."
+        panel.error = "The " + UCase(panel.source) + " stream ended or disconnected."
         ScheduleVideoRetry(panel)
     Else If panel.nativeLoop = "seamless" Then
         StopPanel(panel, false)
@@ -861,7 +1024,9 @@ Sub PanelRestart(panel As Object)
     panel.rebootAt = 0
     change = panel.change
     panel.change = ""
-    If change = "role-or-ptp" Or change = "app-update" Or change = "orientation" Then
+    If change = "network" Then
+        CommitPanelNetwork(panel)
+    Else If change = "role-or-ptp" Or change = "app-update" Or change = "orientation" Then
         RebootSystem()
     Else If change = "video-mode" Then
         If panel.mode.SetMode(panel.settings.output) Then Return
@@ -895,6 +1060,7 @@ Function PanelSet(panel As Object, patch As Object) As String
         If key <> "selection" And key <> "loop" And key <> "intent" And nextSettings[key] <> invalid Then nextSettings[key] = patch[key]
     End For
     If nextSettings.role <> "leader" And nextSettings.role <> "follower" And nextSettings.role <> "standalone" Then Return "Invalid role."
+    If nextSettings.role <> "standalone" And panel.address <> panel.expectedAddress Then Return "Restore the Configured Group IP in Network Settings First."
     If not TextValue(nextSettings.leader) Then Return "Invalid leader."
     If Len(nextSettings.leader) <> 1 Or Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", nextSettings.leader) = 0 Then Return "Invalid leader."
     If nextSettings.role = "leader" And nextSettings.leader <> m.playerId Then Return "Select this player to act as leader."
@@ -905,6 +1071,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.output <> "3840x2160x50p" And nextSettings.output <> "1920x1080x50p" Then Return "Unsupported HDMI mode."
     If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
     If not BooleanValue(nextSettings.audioenabled) Then Return "Choose Whether to Enable HDMI Audio."
+    If not BooleanValue(nextSettings.cecremote) Then Return "Choose Whether to Enable CEC Remote Playback."
     If not TextValue(nextSettings.presentationtitle) Then Return "Enter a Presentation Title."
     If Len(nextSettings.presentationtitle) < 1 Or Len(nextSettings.presentationtitle) > 100 Then Return "Enter a Presentation Title of 1 to 100 Characters."
     If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
@@ -924,7 +1091,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.role <> old.role Or nextSettings.domain <> old.domain Or nextSettings.group <> old.group Or nextSettings.leader <> old.leader Then
         kind = ""
         If Type(nextSettings.selection) = "roAssociativeArray" Then kind = nextSettings.selection.kind
-        If kind <> "srt" And kind <> "web" Then nextSettings.selection = {kind: "built-in"}
+        If kind <> "srt" And kind <> "rtsp" And kind <> "web" Then nextSettings.selection = {kind: "built-in"}
         change = "role-or-ptp"
     Else If nextSettings.rotation <> old.rotation Then
         change = "orientation"
@@ -966,6 +1133,14 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         Return "The native file probe rejected this media."
     Else If action = "settings" Then
         Return PanelSet(panel, body)
+    Else If action = "network" Then
+        If panel.change <> "" Then Return "A Device Restart Is Already Pending."
+        If body.mode <> "dhcp" And body.mode <> "static" Then Return "Invalid Ethernet Mode."
+        If body.mode = "static" And panel.role <> "standalone" And body.address <> panel.expectedAddress Then Return "Use the Configured Group IP for a Grouped Player."
+        panel.networkNext = body
+        panel.change = "network"
+        panel.rebootAt = UpTime(0) + 3
+        Return ""
     Else If action = "peer-audio" Then
         If panel.role <> "follower" Or not panel.ready Or UpTime(0) >= panel.memberUntil Then Return "Group Audio Requires an Active Follower."
         If not BooleanValue(body.enabled) Or not SafeHex(body.revision, 24) Then Return "Invalid Group Audio Request."
@@ -988,8 +1163,26 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
     End If
     If not panel.ready Then Return "Native playback is still starting."
     If panel.change <> "" Then Return "The device is about to restart."
-    If action = "snapshot" Then
-        If not panel.mode.Screenshot({filename: panel.root + "suite-snapshot.jpg", width: 960, height: 540, filetype: "JPEG", quality: 80, async: 0}) Then Return "Could Not Capture the Player Output."
+    If action = "ident" Then
+        If not WholeNumber(body.seconds) Then Return "Enter an IDENT Duration Between 0 and 30 Seconds."
+        If body.seconds < 0 Or body.seconds > 30 Then Return "Enter an IDENT Duration Between 0 and 30 Seconds."
+        If body.seconds = 0 Then
+            HideStartupCard(panel)
+        Else
+            If not ShowStartupCard(panel) Then Return "Could Not Show the IDENT Screen."
+            panel.identUntil = UpTime(0) + body.seconds
+        End If
+        Return ""
+    End If
+    If action = "snapshot" Or action = "thumbnail" Then
+        capture = {filename: panel.root + "suite-snapshot.jpg", width: 960, height: 540, filetype: "JPEG", quality: 80, async: 0}
+        If action = "thumbnail" Then
+            capture.filename = panel.root + "suite-thumbnail.jpg"
+            capture.width = 160
+            capture.height = 90
+            capture.quality = 45
+        End If
+        If not panel.mode.Screenshot(capture) Then Return "Could Not Capture the Player Output."
         Return ""
     End If
     If action = "display-power" Then
@@ -1077,15 +1270,18 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If not panel.waiting Or panel.source <> "group" Or body.revision <> panel.revision Then Return "That revision is not waiting."
         panel.waiting = false
     Else If action = "source" Then
-        panel.waiting = false
-        If body.type = "web" And not PanelWebUrl(body.url) Then Return "Invalid webpage URL."
-        If body.type = "srt" Then
+        If body.type = "web" Then
+            If not PanelWebUrl(body.url) Then Return "Invalid webpage URL."
+        Else If body.type = "srt" Then
             If not PanelSrtUrl(body.url) Then Return "Invalid SRT URL."
-        Else If body.type <> "web" Then
+        Else If body.type = "rtsp" Then
+            If not PanelRtspUrl(body.url) Then Return "Invalid RTSP URL."
+        Else
             Return "Unsupported source."
         End If
+        panel.waiting = false
         PanelSignal(panel, "suite-stop-")
-        SetLiveSource(panel, body.type, body.url)
+        SetLiveSource(panel, body.type, body.url, body.name)
         panel.localOverride = panel.role = "follower"
     Else If action = "play" Then
         If panel.role = "follower" Then Return "The configured leader controls group playback."
@@ -1107,7 +1303,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
             If body.type = "group" Then panel.revision = body.revision
         End If
         If not ephemeral Then panel.settings.selection = {kind: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name}
-    Else If action <> "restart" Or panel.waiting Or (panel.role = "follower" And panel.source <> "srt" And panel.source <> "web") Then
+    Else If action <> "restart" Or panel.waiting Or (panel.role = "follower" And not PanelLiveSource(panel)) Then
         Return "This player cannot perform that command."
     End If
     panel.settings.intent = "auto"
@@ -1289,7 +1485,7 @@ Function TextValue(value As Dynamic) As Boolean
     Return kind = "String" Or kind = "roString"
 End Function
 
-Function WaitForAddress(network As Object, players As Object, port As Object) As String
+Function WaitForAddress(network As Object, players As Object, cardId As Dynamic, port As Object) As String
     LogEvent("WAITING_FOR_ETH0", {})
     address = ""
     For attempt = 1 To 45
@@ -1297,7 +1493,7 @@ Function WaitForAddress(network As Object, players As Object, port As Object) As
         If Type(current) = "roAssociativeArray" Then
             If TextValue(current.ip4_address) Then
                 address = current.ip4_address
-                If current.link = true And address <> "" And players[address] <> invalid Then Return address
+                If current.link = true And address <> "" And (cardId <> invalid Or players[address] <> invalid) Then Return address
             End If
         End If
         Wait(1000, port)

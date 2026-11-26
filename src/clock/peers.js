@@ -74,12 +74,13 @@ async function replyJson(response) {
 }
 
 class Follower {
-  constructor(root, host, mapping, exchange, native) {
+  constructor(root, host, mapping, exchange, native, capture) {
     this.root = root;
     this.host = host;
     this.mapping = mapping;
     this.exchange = exchange;
     this.native = native;
+    this.capture = capture;
     this.ready = '';
     this.problem = '';
     this.nextAttempt = 0;
@@ -99,9 +100,27 @@ class Follower {
   }
 
   async seek(status, positionMs, cycle) {
+    return this.request(status, 'seek', { positionMs, cycle });
+  }
+
+  async request(status, action, body) {
     const node = this.leaderNode(status.leader);
     if (!node) throw new Error('The configured leader is unavailable');
-    return replyJson(await connect(node, `/peer/v1/players/${status.playerid}/seek`, 'POST', { positionMs, cycle }));
+    return replyJson(await connect(node, `/peer/v1/players/${status.playerid}/${action}`, 'POST', body));
+  }
+
+  async preview(status, target, epoch) {
+    const node = this.leaderNode(status.leader);
+    if (!node) throw new Error('The configured leader is unavailable');
+    const response = await connect(node, `/peer/v1/players/${status.playerid}/preview/${target}?v=${epoch}`, 'GET');
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of response) {
+      length += chunk.length;
+      if (length > 32 * 1024) throw new Error('Preview exceeded its expected size');
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks, length);
   }
 
   async pulse(status) {
@@ -127,8 +146,15 @@ class Follower {
           this.problem = error.message.slice(0, 160);
         }).finally(() => { this.preparing = false; });
       }
+      const epoch = reply.capture;
+      if (admitted && this.capture && /^[a-f0-9]{16}$/.test(epoch || '') && this.previewEpoch !== epoch && !this.capturing) {
+        this.capturing = true;
+        void this.capture().then((image) => this.request(status, 'capture', { epoch, jpeg: image.toString('base64') }))
+          .then(() => { this.previewEpoch = epoch; }).catch(() => { /* Retry during the next heartbeat. */ })
+          .finally(() => { this.capturing = false; });
+      }
     } catch (error) {
-      this.problem = error.message.slice(0, 160);
+      this.problem = error.code === 'ECONNREFUSED' ? `Leader ${node.address}:8080 Is Starting or Unavailable. Retrying.` : error.message.slice(0, 160);
       this.nextAttempt = performance.now() + 8000;
     } finally { this.busy = false; }
   }

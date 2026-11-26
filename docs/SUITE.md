@@ -24,12 +24,12 @@ Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.
 
 ## Playback and media
 
-- **Play Built-In** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source. **Loop** controls repeat playback of a local MP4. The schedule sends display power commands while playback continues.
+- **Play Presentation** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source. **Loop** controls repeat playback of a local MP4. The schedule sends display power commands while playback continues.
 - The playhead shows the native playback position once per second. **Pause** becomes **Resume** after a pause. Drag or use the keyboard to move the playhead. During group playback, use any included player to start the group at the selected position. Group controls become available when the included followers report the same clip and playback state. [BrightSign Video Transport](https://docs.brightsign.biz/develop/rovideoplayer)
-- In **Media library**, upload one MP4 per member. Use names such as `Welcome_A.mp4`, `Welcome_B.mp4` and `Welcome_C.mp4`. Fast-start H.264 or H.265 MP4s with constant video frame timing and optional AAC-LC audio are accepted within the documented limits. The leader streams each upload to a temporary file, validates its metadata, checks native playability for its own file, and stores the SHA-256 digest. Each set retains its earlier complete revisions while you upload a replacement.
+- In **Lower Layer Media Library**, select or drop an MP4 for each member. Use one shared title followed by a player suffix. For example, use `Welcome_A.mp4`, `Welcome-B.mp4` and `Welcome.C.mp4`. Check the detected assignments and select **Upload**. The leader verifies the media and retains earlier complete revisions.
 - **Preview on this player** plays the leader's file locally. **Distribute** publishes a complete revision to the configured followers. Followers download their matching file and verify its size, SHA-256 and native playability. **Play group** requires fresh reports from every follower that confirm the same revision, group, PTP domain and HDMI mode. Timing uses native SyncManager. A reconnecting follower can start on a subsequent native transition. The console reports reachability and readiness separately from measured sync quality.
 - In **Standalone**, upload the file for the local player and choose **Play on this player**. The local selection is saved and the player runs without a SyncManager session.
-- Delete actions require confirmation. A selected or distributing revision remains protected. Clear distribution when finished with an inactive revision you want to remove.
+- Select **Delete Set** to remove an uploaded set with all its drafts and revisions. Select **Delete Draft** or **Delete Revision** to remove one item. Select another source and clear the active distribution before deleting media in use. The SD card presentation serves as the card’s baseline.
 
 ## Group membership
 
@@ -37,15 +37,22 @@ Use **Group membership** on the leader to add or remove a provisioned follower. 
 
 ## Lower and upper layers
 
-The **Lower Layer** displays one base source. Select **Play Built-In**, choose an MP4 in **Media Library**, or enter an SRT or webpage URL in **Live or Web Source**. Use **Position and Size** to set the lower-layer window as percentages of the display. Live sources run locally with their own timing.
+The **Lower Layer** displays one base source. Select **Play Presentation**, choose an MP4 in **Lower Layer Media Library**, or enter a URL in **Add or Play a Source**. Use **Play URL** for a one-off source. To keep the source on this player, enter a name and select **Save Source**. Choose a saved source and select **Play Selected**. Use **Position and Size** to change the lower-layer window. Live sources use their own timing and the player restores the last accepted source at boot.
 
 The **Upper Layer** displays a full-screen HTML5 overlay above the lower layer for the current session. Use a transparent page background to show the lower layer through the overlay. **Display Layout** shows the lower-layer window and the overlay outline. A lower webpage and an overlay share one Chromium widget. Both webpages must allow framing. Web content uses standard browser security and has no hardware or Node privileges.
 
+**Display Preview** shows a low-resolution capture of the HDMI output. When the overlay is active, the capture includes both layers. The **Players** panel shows the same type of image for online group members. Select **Edit Layout** to place players in up to three rows and columns. Save the layout from any admitted console. [BrightSign Screenshot API](https://docs.brightsign.biz/develop/rovideomode)
+
 For SRT, use `srt://encoder:port?mode=caller` from a compatible encoder in listener mode, or `srt://0.0.0.0:port?mode=listener` when the encoder initiates the connection. The native SRT source depends on the installed BrightSignOS build or SRT extension. Read the Playback status for a reported start or timeout. Test the actual feed and provider profile before use. [BrightSign SRT support](https://support.brightsign.biz/hc/en-us/community/posts/360038334993-SRT-Secure-Reliable-Transport)
+
+For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:554/live`. Use the stream’s H.264 or H.265 profile supported by the XD236. [BrightSign streaming content](https://docs.brightsign.biz/develop/content-sources)
 
 ## Settings
 
-- **HDMI & audio** changes the selected player between 4K50 and 1080p50 and sets native MP4 and SRT volume. The mode change restarts the application. Synchronized players use matching output modes. Follower MP4 audio stays muted.
+- **HDMI & Audio** changes the selected player between 4K50 and 1080p50 and sets native MP4 and stream volume. Grouped players use matching output modes. Select **CEC Remote Playback** to accept Play, Pause and Stop from a compatible TV. An in-group follower passes the commands to the leader.
+- **Ethernet** shows the active address and MAC. Use **Static** to enter the IPv4 address, mask, gateway and DNS servers. Use **DHCP** to take the settings from your network. Reserve the configured IP for a grouped player. A standalone player can use a different address. Read the new address on its identification screen after restart.
+- **Device Status** shows local CPU, RAM, SD capacity, temperatures and screen identification from HDMI EDID where available. **IDENT** shows player information, address, settings, clock and lighting configuration over the current output. Select **IDENT** again to hide it.
+- **Updates** shows the installed BrightSignOS version. Open the BrightSign updater, sign in to the Diagnostic Web Server, then select **Advanced** and **BrightSignOS Update**. [BrightSign DWS](https://docs.brightsign.biz/manage/diagnostic-web-server-dws)
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
 - **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
@@ -84,7 +91,14 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `POST /seek` | `{"positionMs":30000}` during local or group MP4 playback. On a follower, the request passes to the leader. A group jump starts playback at the requested position. |
 | `POST /stop`, `/restart`, `/blackout` | `{}` |
 | `POST /loop` | `{"enabled":true}` |
-| `POST /source` | `{"type":"web","url":"https://server/page.html"}` or `type: srt` with an SRT URL |
+| `POST /source` | `{"type":"rtsp","url":"rtsp://camera:554/live"}`. Also accepts `srt` and `web`. Use `{"id":"..."}` to select a saved source. |
+| `GET /sources`, `POST /sources` | List local saved sources, or add one with `{"name":"Camera","type":"rtsp","url":"rtsp://camera:554/live"}`. |
+| `DELETE /sources/{id}` | Send `{}` to remove the saved entry. |
+| `POST /ident` | Send `{}` for 10 seconds, `{"seconds":20}` to set a duration, or `{"seconds":0}` to hide IDENT. |
+| `PUT /player-layout` | `{"rows":1,"columns":3,"cells":["A","B","C"]}`. Use `null` for an empty cell. |
+| `POST /preview` | Request new thumbnails with `{}`. Read each thumbnail epoch from `/status`. |
+| `GET /players/{id}/preview?v={epoch}` | Read the corresponding 160 × 90 JPEG. |
+| `GET /network`, `PUT /network` | Read the active Ethernet profile. Apply `{"mode":"static","address":"192.168.1.11","netmask":"255.255.255.0","gateway":"","dns":[],"confirm":true}` or use `mode: dhcp`. Group DHCP also requires `"reserved":true`. |
 | `GET /settings`, `PUT /settings` | Current state or a partial settings update |
 | `GET /ptp` | Multicast listener state and recently heard domains |
 | `PUT /colour` | `{"brightness":0,"hue":0,"saturation":0}`. Each value is an integer −1000 to 1000 |
@@ -96,7 +110,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `POST /snapshot` | Send `{}` to capture a 960 × 540 JPEG |
 | `GET /updates` | Read the running version, staged version and GitHub source |
 | `POST /follow` | Send `{}` to return a follower from its local live source to group playback |
-| `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` as the revision for a draft |
+| `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` to remove a draft or `all` to remove the full uploaded set. |
 
 `PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 

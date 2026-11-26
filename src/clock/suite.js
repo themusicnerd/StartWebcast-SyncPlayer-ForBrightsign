@@ -14,6 +14,27 @@ const { Lighting } = require('./dmx');
 const outputModes = ['3840x2160x50p', '1920x1080x50p'];
 const onlineMs = 16000;
 const maxGroupJumpMs = 99999999;
+const previewInterval = 24000;
+const previewLifetime = 90000;
+const liveSourceTypes = ['srt', 'rtsp', 'web'];
+const maxThumbBytes = 32 * 1024;
+
+function playerLayout(input, members) {
+  const { rows, columns, cells } = input || {};
+  if (![1, 2, 3].includes(rows) || ![1, 2, 3].includes(columns) || !Array.isArray(cells) ||
+      cells.length !== rows * columns || cells.some((id) => id !== null && !members.includes(id)) ||
+      new Set(cells.filter(Boolean)).size !== cells.filter(Boolean).length) {
+    throw new RequestError(400, 'Choose Up to Three Rows and Columns, With Each Player Used Once.');
+  }
+  return { rows, columns, cells };
+}
+
+function thumbBytes(value) {
+  if (typeof value !== 'string' || value.length > 46000 || !/^[a-z0-9+/]+={0,2}$/i.test(value)) return null;
+  const bytes = Buffer.from(value, 'base64');
+  return bytes.length >= 4 && bytes.length <= maxThumbBytes && bytes[0] === 255 && bytes[1] === 216 &&
+    bytes.at(-2) === 255 && bytes.at(-1) === 217 ? bytes : null;
+}
 
 function decoderTiming(players, playback, now = performance.now()) {
   const included = players.filter((player) => player.member);
@@ -70,23 +91,68 @@ function sourceUrl(value, type) {
   if (typeof value !== 'string' || value.length > 1024 || /[\p{Cc}\s]/u.test(value)) throw new RequestError(400, 'Enter a valid source URL.');
   let url;
   try { url = new URL(value); } catch { throw new RequestError(400, 'Enter a valid source URL.'); }
-  if (url.username || url.password) throw new RequestError(400, 'Use a source URL without a username or password.');
+  if (type !== 'rtsp' && (url.username || url.password)) throw new RequestError(400, 'Use a source URL without a username or password.');
   if (type === 'web' && ['http:', 'https:'].includes(url.protocol)) return url.href;
+  if (type === 'rtsp' && url.protocol === 'rtsp:' && url.hostname && !url.hash && url.port !== '0') return url.href;
   if (type === 'srt' && url.protocol === 'srt:' && Number(url.port) > 0 &&
       (url.pathname === '' || url.pathname === '/') && !url.hash &&
       ['caller', 'listener'].includes(url.searchParams.get('mode') || 'caller')) return url.href;
-  throw new RequestError(400, type === 'srt' ? 'Use srt://host:port with caller or listener mode.' : 'Use an HTTP or HTTPS webpage.');
+  const instructions = { srt: 'Use srt://host:port with caller or listener mode.', rtsp: 'Use rtsp://host/path.', web: 'Use an HTTP or HTTPS webpage.' };
+  throw new RequestError(400, instructions[type] || 'Choose SRT, RTSP or Webpage.');
+}
+
+function networkProfile(input) {
+  const { mode, address, netmask, gateway = '', dns = [] } = input;
+  if (mode === 'dhcp') return { mode };
+  const isAddress = (ip) => typeof ip === 'string' && isIP(ip) === 4;
+  const toInt = (ip) => ip.split('.').reduce((value, octet) => (value * 256 + Number(octet)) >>> 0, 0);
+  if (mode !== 'static' || !isAddress(address) || !isAddress(netmask) || (gateway !== '' && !isAddress(gateway)) ||
+      !Array.isArray(dns) || dns.length > 3 || !dns.every(isAddress)) throw new RequestError(400, 'Enter Valid IPv4 Settings and Up to Three DNS Servers.');
+  const mask = toInt(netmask);
+  const hostMask = ~mask >>> 0;
+  const host = toInt(address);
+  const subnet = (host & mask) >>> 0;
+  const last = (subnet | hostMask) >>> 0;
+  const router = gateway && toInt(gateway);
+  if (mask === 0 || hostMask < 3 || (hostMask & (hostMask + 1)) !== 0 ||
+      host <= subnet || host >= last || Number(address.split('.')[0]) < 1 || Number(address.split('.')[0]) >= 224 ||
+      address.startsWith('127.') || address.startsWith('169.254.') ||
+      (gateway && (router <= subnet || router >= last || router === host))) {
+    throw new RequestError(400, 'Use a Usable Host Address, a Contiguous Subnet Mask and a Gateway in the Same Subnet.');
+  }
+  const broadcast = [24, 16, 8, 0].map((shift) => (last >>> shift) & 255).join('.');
+  return { mode, address, netmask, gateway, broadcast, dns };
+}
+
+function cpuSample(stat) {
+  const row = /^cpu\s+((?:\d+\s+){3,}\d+)/m.exec(stat)?.[1];
+  if (!row) return null;
+  const counts = row.trim().split(/\s+/).slice(0, 8).map(Number);
+  return { total: counts.reduce((a, b) => a + b, 0), idle: counts[3] + (counts[4] || 0) };
+}
+
+async function thermalSensors() {
+  const thermalRoot = '/sys/class/thermal';
+  const zones = (await io.readdir(thermalRoot).catch(() => [])).filter((name) => /^thermal_zone\d+$/.test(name)).slice(0, 12);
+  const entries = await Promise.all(zones.map(async (zone) => {
+    const [type, temp] = await Promise.all(['type', 'temp'].map((name) => io.readFile(join(thermalRoot, zone, name), 'ascii').catch(() => '')));
+    const value = temp.trim();
+    const degrees = Number(value) / 1000;
+    return /^-?\d+$/.test(value) && degrees >= -40 && degrees <= 180 ? [type.trim().slice(0, 36) || zone, degrees] : null;
+  }));
+  return Object.fromEntries(entries.filter(Boolean));
 }
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'cecremote', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
   if ('volume' in safe && (!Number.isInteger(safe.volume) || safe.volume < 0 || safe.volume > 100)) throw new RequestError(400, 'Volume must be between 0 and 100.');
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
   if ('audioenabled' in safe && typeof safe.audioenabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
+  if ('cecremote' in safe && typeof safe.cecremote !== 'boolean') throw new RequestError(400, 'CEC Remote Playback Must Be True or False.');
   if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
   if ('presentationtitle' in safe && (typeof safe.presentationtitle !== 'string' || !safe.presentationtitle.trim() || safe.presentationtitle.length > 100 || /[\p{Cc}]/u.test(safe.presentationtitle))) {
@@ -151,9 +217,11 @@ class Suite {
     this.transfers = 0;
     this.mutation = false;
     this.problem = '';
+    this.previews = new Map();
+    this.metrics = {};
     this.exchange = exchange;
     this.library = new Library(root, this.members, async (asset) => (await this.call('probe', { asset })).ok === 'yes');
-    this.follower = new Follower(root, host, this.addresses, exchange, (action, body) => this.call(action, body));
+    this.follower = new Follower(root, host, this.addresses, exchange, (action, body) => this.call(action, body), () => this.captureJpeg('thumbnail'));
     this.lighting = new Lighting(host, root, {
       transport: async (action, body) => {
         if (this.mutation) throw new RequestError(503, 'An operator command is in progress.');
@@ -173,6 +241,20 @@ class Suite {
     try { await this.library.init(); } catch { this.problem = 'The media index or storage could not be opened.'; }
     this.applyRoster();
     await this.lighting.init();
+  }
+
+  async readMetrics() {
+    const proc = (name) => io.readFile(`/proc/${name}`, 'ascii').catch(() => '');
+    const [stat, memory, temperature] = await Promise.all([proc('stat'), proc('meminfo'), thermalSensors()]);
+    const current = cpuSample(stat);
+    const previous = this.cpu;
+    this.cpu = current;
+    const total = current && previous && current.total - previous.total;
+    const cpuPercent = total > 0 ? Math.max(0, Math.min(100, Math.round(100 * (1 - (current.idle - previous.idle) / total)))) : null;
+    const readMemory = (key) => Number(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm').exec(memory)?.[1]) * 1024 || null;
+    const totalBytes = readMemory('MemTotal');
+    const availableBytes = readMemory('MemAvailable');
+    this.metrics = { cpuPercent, gpuPercent: null, temperature, memory: totalBytes && availableBytes ? { totalBytes, availableBytes } : null };
   }
 
   activeMembers() {
@@ -225,6 +307,65 @@ class Suite {
     }
     this.note(`Requested HDMI audio ${enabled ? 'on' : 'off'} for Player ${id}`);
     return this.snapshot().players;
+  }
+
+  layout() {
+    const remote = this.status?.role === 'follower' && this.follower.groupReport()?.layout;
+    if (remote) return remote;
+    if (this.library.state.playerLayout) return this.library.state.playerLayout;
+    const cells = Array.from({ length: 3 }, (_, index) => this.members[index] || null);
+    return { rows: 1, columns: 3, cells };
+  }
+
+  async saveLayout(input) {
+    const layout = playerLayout(input, this.members);
+    if (this.status?.role === 'follower') {
+      try { return await this.follower.request(this.status, 'layout', layout); }
+      catch { throw new RequestError(409, 'The Leader Could Not Save the Layout.'); }
+    }
+    await this.library.transaction((next) => { next.playerLayout = layout; });
+    return layout;
+  }
+
+  async captureJpeg(kind) {
+    const path = join(this.library.root, '..', `suite-${kind}.jpg`);
+    try {
+      await this.call(kind);
+      const info = await io.lstat(path);
+      const limit = kind === 'thumbnail' ? maxThumbBytes : 2 * 1024 * 1024;
+      if (!info.isFile() || info.size > limit || info.size < 4) throw new RequestError(502, 'The Player Returned an Invalid Snapshot.');
+      return await io.readFile(path);
+    } finally { await io.rm(path, { force: true }); }
+  }
+
+  preview(id) {
+    const image = this.previews.get(id);
+    return image && performance.now() - image.at < previewLifetime ? image : null;
+  }
+
+  async refreshPreviews() {
+    if (this.status?.role === 'follower') {
+      try { return await this.follower.request(this.status, 'preview', {}); }
+      catch { throw new RequestError(409, 'The Leader Could Not Refresh the Snapshots.'); }
+    }
+    const now = performance.now();
+    if (this.previewRequest && now - this.previewRequest.at < previewInterval) return { epoch: this.previewRequest.epoch };
+    const epoch = randomBytes(8).toString('hex');
+    this.previewRequest = { epoch, at: now };
+    void this.captureJpeg('thumbnail').then((bytes) => {
+      if (this.previewRequest.epoch === epoch) this.previews.set(this.id, { epoch, bytes, at: performance.now() });
+    }).catch(() => { /* Recheck on the next preview request. */ });
+    return { epoch };
+  }
+
+  async getPreview(id, epoch) {
+    if (!this.members.includes(id) || !/^[a-f0-9]{16}$/.test(epoch || '')) return null;
+    if (this.status?.role === 'follower') {
+      try { return await this.follower.preview(this.status, id, epoch); }
+      catch { return null; }
+    }
+    const image = this.preview(id);
+    return image?.epoch === epoch ? image.bytes : null;
   }
 
   receivePlayback(raw) {
@@ -320,7 +461,8 @@ class Suite {
     const leaderReport = native?.role === 'follower' ? this.follower.groupReport() : null;
     const reportedPlayers = new Map((leaderReport?.players || []).map((player) => [player.id, player]));
     const players = this.members.map((id) => {
-      if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true };
+      if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true,
+        thumbnail: reportedPlayers.get(id)?.thumbnail || this.preview(id)?.epoch || '' };
       const mirrored = reportedPlayers.get(id);
       if (mirrored) return { ...mirrored, ip: this.addresses[id], manageable: false };
       const peer = this.peers.get(id);
@@ -329,7 +471,7 @@ class Suite {
       const audioPending = active.includes(id) && command && command.revision !== peer?.status.audiorevision ? command.enabled : null;
       return { id, ip: this.addresses[id], connection: recent ? 'online' : 'offline', lastSeen: peer?.at || null, audioPending,
         status: recent ? peer.status : null, ready: recent ? peer.ready : '', problem: recent ? peer.problem : '', member: active.includes(id),
-        manageable: native?.role === 'leader' && digestPattern.test(this.exchange.clients?.[id]) };
+        manageable: native?.role === 'leader' && digestPattern.test(this.exchange.clients?.[id]), thumbnail: this.preview(id)?.epoch || '' };
     });
     const ptp = this.observe();
     const localPlayback = this.playback || native;
@@ -341,8 +483,8 @@ class Suite {
     });
     const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
       decoderTiming(reports, localPlayback);
-    return { native, players, storage: this.storage, problem: this.problem, ptp,
-      dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot() };
+    return { native, players, layout: this.layout(), storage: this.storage, problem: this.problem, ptp,
+      dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot(), metrics: this.metrics };
   }
 
   ensureLeader() {
@@ -378,6 +520,40 @@ class Suite {
 
   async operator(request, response, url, json, send) {
     const path = url.pathname;
+    if (path === '/api/v1/network' && request.method === 'GET') return json(response, 200, {
+      config: this.status?.network, result: this.status?.networkresult || '', groupAddress: this.addresses[this.id], role: this.status?.role,
+    });
+    if (path === '/api/v1/network' && request.method === 'PUT') return json(response, 202,
+      await this.update(request, async () => {
+        if (!this.status?.network?.address) throw new RequestError(503, 'The Current Network Configuration Is Unavailable.');
+        const body = await readJson(request);
+        if (body.confirm !== true) throw new RequestError(400, 'Confirm the Ethernet Change.');
+        const profile = networkProfile(body);
+        if (profile.mode === 'static' && this.status.role !== 'standalone' && profile.address !== this.addresses[this.id]) {
+          throw new RequestError(409, 'Use This Player’s Configured Group IP. Switch to Standalone to Use a Different IP.');
+        }
+        if (profile.mode === 'static' && this.config.players[profile.address] && this.config.players[profile.address] !== this.id) {
+          throw new RequestError(409, 'That Address Belongs to Another Provisioned Player.');
+        }
+        if (profile.mode === 'dhcp' && this.status.role !== 'standalone' && body.reserved !== true) {
+          throw new RequestError(400, 'Confirm a DHCP Reservation for This Player’s Group Address.');
+        }
+        await this.call('network', profile);
+        this.note('Ethernet Change Scheduled');
+        return { ok: true, address: profile.address || (this.status.role !== 'standalone' ? this.addresses[this.id] : null) };
+      }));
+    if (path === '/api/v1/player-layout' && request.method === 'PUT') return json(response, 200,
+      await this.update(request, async () => this.saveLayout(await readJson(request))));
+    if (path === '/api/v1/preview' && request.method === 'POST') {
+      await readJson(request);
+      return json(response, 202, await this.refreshPreviews());
+    }
+    const thumb = /^\/api\/v1\/players\/([A-Z])\/preview$/.exec(path);
+    if (thumb && request.method === 'GET') {
+      const bytes = await this.getPreview(thumb[1], url.searchParams.get('v'));
+      return bytes ? send(response, 200, 'image/jpeg', bytes, { 'Cache-Control': 'private, max-age=90' }) :
+        json(response, 404, { error: 'Preview Unavailable.' });
+    }
     const audio = /^\/api\/v1\/group\/audio\/([A-Z])$/.exec(path);
     if (audio && request.method === 'PUT') {
       return json(response, 200, await this.update(request, async () => {
@@ -388,18 +564,11 @@ class Suite {
     if (path === '/api/v1/snapshot' && request.method === 'POST') {
       if (request.headers['idempotency-key']) throw new RequestError(400, 'Snapshots Use a New Capture for Each Request.');
       await readJson(request);
-      const bytes = await this.update(request, async () => {
-        const file = join(this.library.root, '..', 'suite-snapshot.jpg');
-        try {
-          await this.call('snapshot');
-          const info = await io.lstat(file);
-          if (!info.isFile() || info.size > 2 * 1024 * 1024 || info.size < 4) throw new RequestError(502, 'The Player Returned an Invalid Snapshot.');
-          return await io.readFile(file);
-        } finally { await io.rm(file, { force: true }); }
-      });
+      const bytes = await this.update(request, () => this.captureJpeg('snapshot'));
       return send(response, 200, 'image/jpeg', bytes);
     }
     if (request.method === 'GET') {
+      if (path === '/api/v1/sources') return json(response, 200, this.savedSources());
       if (path === '/api/v1/status') return json(response, 200, this.snapshot());
       if (path === '/api/v1/playback') return json(response, 200, this.playbackStatus());
       if (path === '/api/v1/players') return json(response, 200, this.snapshot().players);
@@ -411,6 +580,17 @@ class Suite {
       if (path === '/api/v1/ptp') return json(response, 200, this.snapshot().ptp);
       if (path === '/api/v1/lighting') return json(response, 200, this.lighting.snapshot());
       if (path === '/api/v1/jobs/distribution') return json(response, 200, { dispatch: this.library.state.dispatch, players: this.snapshot().players });
+    }
+    if (path === '/api/v1/sources' && request.method === 'POST') {
+      return json(response, 201, await this.update(request, async () => this.addSource(await readJson(request))));
+    }
+    const source = /^\/api\/v1\/sources\/([a-f0-9]{24})$/.exec(path);
+    if (source && request.method === 'DELETE') {
+      return json(response, 200, await this.update(request, async () => {
+        await readJson(request);
+        await this.library.transaction((next) => { next.sources = (next.sources || []).filter(({ id }) => id !== source[1]); });
+        return this.savedSources();
+      }));
     }
     const member = /^\/api\/v1\/group\/members\/([A-Z])$/.exec(path);
     if (member && request.method === 'PUT') {
@@ -428,7 +608,7 @@ class Suite {
       if (result.replaced) await this.library.reap([result.replaced]).catch(() => {});
       return json(response, 201, result);
     }
-    const remove = /^\/api\/v1\/content\/([a-f0-9]{24})\/([a-f0-9]{24}|draft)$/.exec(path);
+    const remove = /^\/api\/v1\/content\/([a-f0-9]{24})\/([a-f0-9]{24}|draft|all)$/.exec(path);
     if (remove && request.method === 'DELETE') {
       this.ensureLibrary();
       if (this.transfers) throw new RequestError(409, 'Wait for the current media transfer.');
@@ -466,7 +646,7 @@ class Suite {
         return this.lighting.slot(slot, id, revision);
       }));
     }
-    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|follow|distribute|display-power)$/.exec(path);
+    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|follow|distribute|display-power|ident)$/.exec(path);
     if (command && request.method === 'POST') {
       const action = command[1];
       return json(response, 200, await this.update(request, async () => {
@@ -480,6 +660,11 @@ class Suite {
   }
 
   async command(action, body) {
+    if (action === 'ident') {
+      const seconds = body.seconds ?? 10;
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 30) throw new RequestError(400, 'Enter an IDENT Duration Between 0 and 30 Seconds.');
+      return this.call(action, { seconds });
+    }
     if (action === 'display-power') {
       if (!['on', 'standby'].includes(body.power)) throw new RequestError(400, 'Choose Power On or Standby.');
       return this.call(action, { wake: body.power === 'on' });
@@ -509,8 +694,15 @@ class Suite {
       return this.library.distribute(body.id, body.revision);
     }
     if (action === 'source') {
-      if (!['srt', 'web'].includes(body.type)) throw new RequestError(400, 'Choose an SRT feed or webpage.');
-      return this.call(action, { type: body.type, url: sourceUrl(body.url, body.type) });
+      let name;
+      if (body.id !== undefined) {
+        const source = (this.library.state.sources || []).find(({ id }) => id === body.id);
+        if (!source) throw new RequestError(404, 'Saved Source Not Found.');
+        body = source;
+        name = source.name;
+      }
+      if (!liveSourceTypes.includes(body.type)) throw new RequestError(400, 'Choose an SRT Feed, RTSP Feed or Webpage.');
+      return this.call(action, { type: body.type, url: sourceUrl(body.url, body.type), name });
     }
     if (action === 'play') {
       if (body.id === 'presentation') return this.call(action, { type: body.preview === true ? 'built-in-local' : 'built-in' });
@@ -533,8 +725,49 @@ class Suite {
     return this.call(action);
   }
 
-  async peer(request, response, url, json) {
-    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|seek|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
+  cecTransport(action) {
+    if (!['play', 'pause', 'stop'].includes(action)) throw new RequestError(400, 'Unknown CEC Playback Action.');
+    const state = this.playbackStatus()?.state || this.status?.state;
+    if (action === 'play') {
+      if (state === 'playing' || state === 'starting') return;
+      return this.command(state === 'paused' ? 'resume' : 'restart', {});
+    }
+    if (action === 'pause' && state === 'paused') return;
+    return this.command(action, {});
+  }
+
+  async receiveCec(action) {
+    if (this.status?.cecremote !== true || !['play', 'pause', 'stop'].includes(action)) return;
+    try {
+      if (this.status.role === 'follower' && !this.status.localoverride) await this.follower.request(this.status, 'transport', { action });
+      else await this.cecTransport(action);
+      this.note(`CEC Remote: ${action}`);
+    } catch {
+      this.note(`CEC Remote: Could Not Apply ${action}`);
+    }
+  }
+
+  savedSources() {
+    return (this.library.state.sources || []).map(({ id, name, type }) => ({ id, name, type }));
+  }
+
+  async addSource(body) {
+    const { name, type } = body;
+    if (typeof name !== 'string' || !name.trim() || name.length > 80 || /[\p{Cc}]/u.test(name) || !liveSourceTypes.includes(type)) {
+      throw new RequestError(400, 'Enter a Name and Choose SRT, RTSP or Webpage.');
+    }
+    const source = { id: randomBytes(12).toString('hex'), name: name.trim(), type, url: sourceUrl(body.url, type) };
+    await this.library.transaction((next) => {
+      next.sources ||= [];
+      if (next.sources.length >= 50) throw new RequestError(409, 'Remove a Saved Source Before Adding Another.');
+      if (next.sources.some(({ name }) => name.toLowerCase() === source.name.toLowerCase())) throw new RequestError(409, 'A Saved Source Already Uses That Name.');
+      next.sources.push(source);
+    });
+    return this.savedSources();
+  }
+
+  async peer(request, response, url, json, send) {
+    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|seek|transport|layout|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
     if (!match || this.status?.role !== 'leader') throw new RequestError(404, 'Peer action unavailable.');
     const player = match[1];
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization || '');
@@ -553,9 +786,9 @@ class Suite {
       let group;
       if (admitted) {
         const snapshot = this.snapshot();
-        group = { timing: snapshot.timing, seekable: this.playbackStatus()?.groupSeekable === true,
-          players: snapshot.players.map(({ id, member, connection, status }) => ({
-            id, member, connection: connection === 'local' ? 'online' : connection,
+        group = { timing: snapshot.timing, layout: snapshot.layout, seekable: this.playbackStatus()?.groupSeekable === true,
+          players: snapshot.players.map(({ id, member, connection, status, thumbnail }) => ({
+            id, member, thumbnail, connection: connection === 'local' ? 'online' : connection,
             status: status ? { role: String(status.role || '').slice(0, 12), output: String(status.output || '').slice(0, 24),
               state: String(status.state || '').slice(0, 24), domain: Number.isInteger(status.domain) ? status.domain : null,
               audioenabled: status.audioenabled === true, muted: status.muted === true, volume: Number.isInteger(status.volume) ? status.volume : null } : null,
@@ -563,8 +796,43 @@ class Suite {
       }
       return json(response, 200, { admitted, wake: admitted ? this.status.scheduledwake : undefined,
         audio: audio && audio.revision !== native.audiorevision ? audio : undefined,
+        capture: admitted && this.previewRequest && performance.now() - this.previewRequest.at < previewInterval ? this.previewRequest.epoch : undefined,
         group,
         assignment: admitted ? this.library.assignment(player) : null });
+    }
+    if (['layout', 'preview', 'capture'].includes(match[2]) || match[3]) {
+      if (!this.activeMembers().includes(player)) throw new RequestError(409, 'Player Is Outside the Active Group.');
+      if (match[2] === 'layout' && request.method === 'POST') return json(response, 200,
+        await this.update(request, async () => this.saveLayout(await readJson(request))));
+      if (match[2] === 'preview' && request.method === 'POST') {
+        await readJson(request);
+        return json(response, 200, await this.refreshPreviews());
+      }
+      if (match[2] === 'capture' && request.method === 'POST') {
+        const { epoch, jpeg } = await readJson(request, 48 * 1024);
+        const bytes = thumbBytes(jpeg);
+        if (!bytes || epoch !== this.previewRequest?.epoch) throw new RequestError(400, 'Invalid or Expired Preview.');
+        this.previews.set(player, { epoch, bytes, at: performance.now() });
+        return json(response, 200, { ok: true });
+      }
+      if (match[3] && request.method === 'GET') {
+        const bytes = await this.getPreview(match[3], url.searchParams.get('v'));
+        if (!bytes) throw new RequestError(404, 'Preview Unavailable.');
+        return send(response, 200, 'image/jpeg', bytes);
+      }
+    }
+    if (match[2] === 'transport' && request.method === 'POST') {
+      const peer = this.peers.get(player);
+      if (!this.activeMembers().includes(player) || !peer || performance.now() - peer.seen >= onlineMs ||
+          peer.status.group !== this.status.group || peer.status.domain !== this.status.domain || peer.status.cecremote !== true) {
+        throw new RequestError(409, 'This Player Cannot Use Group CEC Transport.');
+      }
+      return json(response, 200, await this.update(request, async () => {
+        const { action } = await readJson(request);
+        await this.cecTransport(action);
+        this.note(`CEC Remote on Player ${player}: ${action}`);
+        return { ok: true };
+      }));
     }
     if (match[2] === 'seek' && request.method === 'POST') {
       const peer = this.peers.get(player);
@@ -578,8 +846,8 @@ class Suite {
         return { ok: true };
       }));
     }
-    if (match[3] && request.method === 'GET') {
-      const assignment = this.library.assignment(player, match[3]);
+    if (match[4] && request.method === 'GET') {
+      const assignment = this.library.assignment(player, match[4]);
       if (!assignment) throw new RequestError(404, 'No matching assignment.');
       if (this.transfers >= 1 || this.library.busy) throw new RequestError(409, 'The transfer slot is busy.');
       const path = assetPath(this.library.root, assignment.digest);
@@ -596,4 +864,4 @@ class Suite {
   }
 }
 
-module.exports = { Suite, colourValues, decoderTiming, networkTimeServer, readJson, rectangle, sanitiseSettings, sourceUrl };
+module.exports = { Suite, colourValues, cpuSample, decoderTiming, networkProfile, networkTimeServer, playerLayout, readJson, rectangle, sanitiseSettings, sourceUrl };

@@ -3,10 +3,36 @@
 <head>
   <meta charset="utf-8">
   <title>StartWebcast output layers</title>
-  <style>html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}iframe{border:0;position:absolute}#upper{inset:0;width:100%;height:100%;z-index:2;pointer-events:none}</style>
+  <style>
+    html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
+    iframe{border:0;position:absolute}#upper{inset:0;width:100%;height:100%;z-index:2;pointer-events:none}
+    #startup{box-sizing:border-box;min-height:100%;padding:5vh 6vw;background:#160f20;color:#f5edff;font:2.3vh Arial,sans-serif}
+    .startup-logo{width:27vh;height:16.85vh;overflow:hidden;margin-bottom:2vh}
+    .startup-logo img{width:100%;height:auto;display:block}
+    .startup-header{display:flex;gap:4vw;align-items:center;margin-bottom:2.5vh}
+    h1{margin:0;color:#ffac68;font-size:5vh}
+    #repository{color:#d8c3f1;margin:.75vh 0 0;font-size:2.1vh;overflow-wrap:anywhere}
+    #diagnostics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.55vh 1.5vw;margin:0}
+    #diagnostics div{min-width:0;border-top:1px solid #77569b;padding-top:1vh}
+    dt{color:#d8c3f1;font-size:1.75vh;margin-bottom:.4vh}
+    dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+    @media (orientation:portrait){
+      #startup{font-size:1.85vh;padding:3vh 5vw}
+      .startup-header{display:block;margin-bottom:2vh}
+      .startup-logo{width:21vh;height:13.1vh;margin-bottom:1vh}
+      #diagnostics{grid-template-columns:repeat(2,minmax(0,1fr));gap:.85vh 2vw}
+      #diagnostics div{padding-top:.65vh}
+      dt{font-size:1.5vh}
+      h1{font-size:3.4vh}
+    }
+  </style>
   <script src="layer.js" defer></script>
 </head>
 <body>
+  <main id="startup" hidden>
+    <header class="startup-header"><div class="startup-logo"><img src="startwebcast.png" alt="StartWebcast"></div><div><h1 id="player-name"></h1><p id="repository"></p></div></header>
+    <dl id="diagnostics"></dl>
+  </main>
   <iframe id="lower" title="Lower webpage" sandbox="allow-scripts allow-same-origin" allow="autoplay"></iframe>
   <iframe id="upper" title="Upper HTML5 overlay" sandbox="allow-scripts allow-same-origin"></iframe>
 </body>

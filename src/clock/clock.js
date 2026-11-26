@@ -4,7 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const updateHeaders = { 'Content-Type': 'application/json', 'X-SyncPlayer-Request': 'control' };
 const dateFormat = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'long' });
 const inputFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const labels = { 'built-in': 'Presentation', 'built-in-local': 'Local Presentation Preview', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
+const labels = { 'built-in': 'Presentation', 'built-in-local': 'Local Presentation Preview', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', rtsp: 'RTSP Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
 const states = { booting: 'Booting', idle: 'Idle', starting: 'Starting', playing: 'Playing', paused: 'Paused', stopped: 'Stopped', standby: 'Standby', ended: 'Ended', error: 'Error', blackout: 'Blackout', 'outside group': 'Outside Group', online: 'Online', offline: 'Offline', local: 'Local' };
 let dashboard;
 let library = [];
@@ -14,6 +14,8 @@ let toastTimer;
 let playback;
 let readingPlayback = false;
 let scrubbing = false;
+let layoutDraft;
+let pendingUploads = [];
 
 function showMessage(message, error = false) {
   const toast = $('#feedback');
@@ -188,12 +190,85 @@ function renderMembership(players, native) {
   if (focused) group.querySelector(`[data-member="${focused}"]`)?.focus();
 }
 
+function previewUrl(player) {
+  return player?.thumbnail ? `/api/v1/players/${player.id}/preview?v=${encodeURIComponent(player.thumbnail)}` : '';
+}
+
+function showLayerPreview(player, overlay) {
+  const image = $('#layer-preview');
+  const path = previewUrl(player);
+  if (path && image.getAttribute('src') !== path) image.src = path;
+  if (!path) image.removeAttribute('src');
+  image.hidden = !path;
+  $('#layer-preview-empty').hidden = !!path;
+  $('#output-preview-label').textContent = overlay ? 'Display Preview · Both Layers' : 'Display Preview · Lower Layer';
+}
+
+function drawLayoutEditor() {
+  const cells = $('#layout-cells');
+  cells.style.gridTemplateColumns = `repeat(${layoutDraft.columns}, minmax(0, 1fr))`;
+  cells.replaceChildren(...layoutDraft.cells.map((id, index) => {
+    const row = Math.floor(index / layoutDraft.columns) + 1;
+    const column = index % layoutDraft.columns + 1;
+    const label = item('label', `Row ${row}, Column ${column}`);
+    const select = item('select');
+    select.append(Object.assign(item('option', 'Empty'), { value: '' }));
+    for (const player of dashboard.players) select.append(Object.assign(item('option', `Player ${player.id}`), { value: player.id }));
+    select.value = id || '';
+    select.addEventListener('change', () => {
+      const value = select.value || null;
+      const other = value && layoutDraft.cells.indexOf(value);
+      if (value && other >= 0) layoutDraft.cells[other] = layoutDraft.cells[index];
+      layoutDraft.cells[index] = value;
+      [...cells.querySelectorAll('select')].forEach((field, position) => { field.value = layoutDraft.cells[position] || ''; });
+    });
+    label.append(select);
+    return label;
+  }));
+}
+
+function toggleLayoutEditor(open) {
+  const editor = $('#player-layout-form');
+  editor.hidden = !open;
+  $('#edit-player-layout').setAttribute('aria-expanded', String(open));
+  layoutDraft = open ? { ...dashboard.layout, cells: [...dashboard.layout.cells] } : undefined;
+  if (!open) return;
+  editor.elements.rows.value = layoutDraft.rows;
+  editor.elements.columns.value = layoutDraft.columns;
+  drawLayoutEditor();
+}
+
+function renderDeviceStatus(native, storage, metrics = {}) {
+  if (!native) return;
+  const screen = native.screen || {};
+  const sensor = Object.entries({ ...metrics.temperature, ...native.temperature }).filter(([, value]) => Number.isFinite(value));
+  const memory = metrics.memory && `${bytes(metrics.memory.totalBytes - metrics.memory.availableBytes)} Used / ${bytes(metrics.memory.totalBytes)}`;
+  const disk = storage && `${bytes(storage.freeBytes)} Free / ${bytes(storage.sizeBytes)}`;
+  const percent = (value) => Number.isFinite(value) ? `${value}%` : 'Unavailable';
+  const name = [screen.manufacturer, screen.name].filter(Boolean).join(' ');
+  const screenId = [Number.isFinite(screen.product) ? `Product ${screen.product.toString(16).toUpperCase().padStart(4, '0')}` : '', screen.serial ? `Serial ${screen.serial}` : ''].filter(Boolean).join(' · ');
+  const fields = [
+    ['CPU Usage', percent(metrics.cpuPercent)], ['GPU Usage', percent(metrics.gpuPercent)], ['RAM', memory], ['SD Storage', disk],
+    ['Temperature', sensor.map(([key, value]) => `${key.replace(/_/g, ' ')} ${value.toFixed(1)} °C`).join(' · ')],
+    ['HDMI Screen', screen.connected === true ? 'Connected' : screen.connected === false ? 'Disconnected' : 'Unavailable'],
+    ['Screen Name', name], ['Screen ID', screenId], ['Player Uptime', Number.isFinite(native.uptime) ? duration(native.uptime) : ''],
+  ];
+  $('#device-stats').replaceChildren(...fields.map(([title, value]) => {
+    const cell = item('div');
+    cell.append(item('dt', title), item('dd', value || 'Unavailable'));
+    return cell;
+  }));
+}
+
 function renderStatus() {
   const { native, players, storage, events, ptp, dispatch, lighting, timing } = dashboard;
   $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native Player Starting';
   $('#connection').dataset.state = 'online';
   if (native) {
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
+    $('#firmware-version').textContent = `Installed Version ${native.firmware}`;
+    $('#ident').disabled = native.state === 'booting';
+    $('#ident').setAttribute('aria-pressed', String(native.ident === true));
     if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = 'Use HDMI Audio and Volume to Control Native Video and SRT Audio on This Player.';
@@ -215,7 +290,7 @@ function renderStatus() {
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
-    fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false });
+    fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false, cecremote: native.cecremote === true });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
     fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
@@ -236,6 +311,8 @@ function renderStatus() {
     const network = native.ntpresult;
     $('#ntp-status').textContent = network?.failure_reason ? `Last attempt: ${network.failure_reason}` : network?.success_timestamp ? 'The player reports a successful network update.' : 'The default server is 0.au.pool.ntp.org. An empty server disables network time.';
   }
+  const local = players.find(({ id }) => id === native?.playerid);
+  if (local?.ip) $('#os-update').href = `https://${local.ip}/`;
   const active = players.filter(({ member }) => member);
   const suffixes = (native?.role === 'standalone' ? [native.playerid] : active.map(({ id }) => id)).map((id) => `Welcome_${id}.mp4`);
   if (suffixes.length) $('#drop > span').textContent = `Use names like ${suffixes.join(', ')}.`;
@@ -246,7 +323,21 @@ function renderStatus() {
   syncSummary.textContent = native?.role === 'standalone' ? 'Standalone' : Number.isFinite(timing?.spreadMs) ? `${timingText} · ${timing.spreadMs} ms` : timingText;
   syncSummary.title = timing?.estimated ? 'Estimated From Native Decoder Reports at the Leader. HDMI Frame Alignment Requires Measurement.' : 'Reports From the Native Decoders';
   renderMembership(players, native);
-  const list = players.map((player) => {
+  renderDeviceStatus(native, storage, dashboard.metrics);
+  if (native?.network?.address) {
+    const profile = native.network;
+    $('#network-current').textContent = `${profile.address} · ${profile.mode === 'dhcp' ? 'DHCP' : 'Static'}${profile.mac ? ` · ${profile.mac}` : ''}`;
+    fill('#network-form', { ...profile, dns: (profile.dns || []).join(', ') });
+    $('#network-form [type=submit]').disabled = Boolean(native.pending);
+    showNetworkMode();
+  }
+  const layout = dashboard.layout || { rows: 1, columns: Math.min(3, Math.max(1, players.length)), cells: players.slice(0, 3).map(({ id }) => id) };
+  $('#edit-player-layout').disabled = !dashboard.layout;
+  showLayerPreview(local, native?.overlay && native.state !== 'blackout');
+  const roster = new Map(players.map((player) => [player.id, player]));
+  const list = layout.cells.map((id) => {
+    const player = roster.get(id);
+    if (!player) return item('div', 'Empty', 'player empty-player');
     const info = player.status;
     const card = item('div', undefined, 'player');
     const top = item('div', undefined, 'panel-heading');
@@ -255,7 +346,14 @@ function renderStatus() {
     top.append(item('strong', player.id), status);
     const link = item('a', player.ip);
     link.href = `https://${player.ip}:8080/`;
+    const frame = item('div', undefined, 'preview-frame');
+    const path = previewUrl(player);
+    if (path) {
+      const image = Object.assign(item('img'), { src: path, alt: `Player ${player.id} Display Capture`, width: 160, height: 90, loading: 'lazy' });
+      frame.append(image);
+    } else frame.append(item('span', 'No Preview'));
     card.append(top, link, item('p', info ? `${labels[info.role]} · ${info.output}` : player.lastSeen ? `Last seen ${dateFormat.format(new Date(player.lastSeen))}` : 'Waiting for this player'));
+    top.after(frame);
     const offset = timing?.offsets?.[player.id];
     if (Number.isFinite(offset)) {
       const position = player.id === timing.leader ? 'Timing Reference' : offset === 0 ? 'Matches Leader' : `${Math.abs(offset)} ms ${offset > 0 ? 'Ahead' : 'Behind'}`;
@@ -265,7 +363,9 @@ function renderStatus() {
     else if (player.ready) card.append(item('p', `Verified ${player.ready.slice(0, 8)}`));
     return card;
   });
-  $('#players').replaceChildren(...list);
+  const grid = $('#players');
+  grid.style.gridTemplateColumns = `repeat(${layout.columns}, minmax(0, 1fr))`;
+  grid.replaceChildren(...list);
   $('#storage').textContent = storage ? `SD card · ${bytes(storage.freeBytes)} free of ${bytes(storage.sizeBytes)}` : 'SD storage unavailable';
   $('#distribution').hidden = !dispatch;
   if (dispatch) {
@@ -295,7 +395,7 @@ async function refresh() {
     $('#connection').dataset.state = 'offline';
     $('#tv-power').textContent = 'TV Unknown';
     $('#tv-power').dataset.state = 'unknown';
-    $('#cec-on').disabled = $('#cec-standby').disabled = $('#snapshot').disabled = true;
+    $('#cec-on').disabled = $('#cec-standby').disabled = $('#snapshot').disabled = $('#ident').disabled = true;
   }
 }
 
@@ -351,6 +451,11 @@ function renderLibrary() {
       row.append(controls);
       card.append(row);
     }
+    if (native?.role !== 'follower') {
+      const controls = item('div', undefined, 'actions');
+      controls.append(action('Delete Set', () => remove(set, 'all'), 'danger'));
+      card.append(controls);
+    }
     return card;
   });
   $('#items').replaceChildren(...items);
@@ -367,7 +472,9 @@ async function command(name, data = {}) {
 }
 
 async function remove(set, revision) {
-  if (!confirm(`Delete the ${revision === 'draft' ? 'draft' : 'selected revision'} of ${set.name}?`)) return;
+  const target = revision === 'all' ? `the full set ${set.name}, including all revisions and drafts` :
+    `the ${revision === 'draft' ? 'draft' : 'selected revision'} of ${set.name}`;
+  if (!confirm(`Delete ${target}?`)) return;
   await operate(() => api(`content/${set.id}/${revision}`, 'DELETE', { confirm: true }), 'Media removed.');
   await refreshLibrary();
 }
@@ -401,10 +508,25 @@ async function upload(files) {
     try {
       for (const [index, file] of files.entries()) await uploadFile(file, replace, index + 1, files.length);
       $('#media-files').value = '';
+      assignUploads([]);
     } finally { $('#upload-progress').hidden = true; }
   }, 'Media uploaded and checked.');
   await refreshLibrary();
   await refresh();
+}
+
+function assignUploads(files) {
+  pendingUploads = files;
+  const plan = $('#upload-plan');
+  const ids = dashboard?.native?.role === 'standalone' ? [dashboard.native.playerid] :
+    (dashboard?.players || []).filter((player) => player.member).map(({ id }) => id);
+  plan.replaceChildren(...files.map(({ name }) => {
+    const suffix = /[_. -]([a-z])\.mp4$/i.exec(name)?.[1].toUpperCase();
+    const assignment = !/\.mp4$/i.test(name) ? 'MP4 Required' : ids.includes(suffix) ? `Player ${suffix}` :
+      ids.length === 1 && !suffix ? `Player ${ids[0]}` : 'Add a Current Player Suffix';
+    return item('li', `${name} → ${assignment}`);
+  }));
+  plan.hidden = !files.length;
 }
 
 async function saveSettings(form, settings, confirmation) {
@@ -463,19 +585,86 @@ $('#position').addEventListener('change', async (event) => {
 $('#position').addEventListener('pointercancel', () => { scrubbing = false; void refreshPlayback(); });
 $('#loop').addEventListener('change', (event) => command('loop', { enabled: event.target.checked }));
 $('#clear-distribution').addEventListener('click', () => command('distribute', { clear: true }));
-form('#upload', () => upload([...$('#media-files').files]));
+form('#upload', () => upload(pendingUploads));
+$('#media-files').addEventListener('change', (event) => assignUploads([...event.target.files]));
 $('#drop').addEventListener('dragover', (event) => { event.preventDefault(); $('#drop').classList.add('drag'); });
 $('#drop').addEventListener('dragleave', () => $('#drop').classList.remove('drag'));
-$('#drop').addEventListener('drop', (event) => { event.preventDefault(); $('#drop').classList.remove('drag'); upload([...event.dataTransfer.files]); });
-$('#source-form').elements.type.addEventListener('change', (event) => {
-  $('#source-form').elements.url.placeholder = event.target.value === 'srt' ? 'srt://encoder:9000?mode=caller' : 'https://server/page.html';
+$('#drop').addEventListener('drop', (event) => {
+  event.preventDefault();
+  $('#drop').classList.remove('drag');
+  $('#media-files').value = '';
+  assignUploads([...event.dataTransfer.files]);
 });
-form('#source-form', (fields) => command('source', { type: fields.type.value, url: fields.url.value.trim() }));
+$('#edit-player-layout').addEventListener('click', () => toggleLayoutEditor(!layoutDraft));
+$('#cancel-layout').addEventListener('click', () => toggleLayoutEditor(false));
+for (const name of ['rows', 'columns']) $('#player-layout-form').elements[name].addEventListener('change', (event) => {
+  layoutDraft[name] = Number(event.target.value);
+  layoutDraft.cells = Array.from({ length: layoutDraft.rows * layoutDraft.columns }, (_, index) => layoutDraft.cells[index] || null);
+  drawLayoutEditor();
+});
+form('#player-layout-form', async () => {
+  const result = await operate(() => api('player-layout', 'PUT', layoutDraft), 'Player Layout Saved.');
+  if (!result) return;
+  toggleLayoutEditor(false);
+  await refresh();
+});
+$('#refresh-previews').addEventListener('click', async () => {
+  await operate(() => api('preview', 'POST'), 'Display Previews Requested.');
+  await refresh();
+});
+const previewVisible = new Set();
+const previewObserver = new IntersectionObserver((entries) => {
+  for (const entry of entries) {
+    if (entry.isIntersecting) previewVisible.add(entry.target);
+    else previewVisible.delete(entry.target);
+  }
+  refreshPreviewsWhenVisible();
+});
+previewObserver.observe($('#players-panel'));
+previewObserver.observe($('#layer-preview-frame'));
+function refreshPreviewsWhenVisible() {
+  if (previewVisible.size && !document.hidden && dashboard?.native && !busy) void api('preview', 'POST').catch(() => {});
+}
+setInterval(refreshPreviewsWhenVisible, 30000);
+const savedSourceForm = $('#saved-source-form');
+const sourceSelect = savedSourceForm.elements.id;
+function populateSources(sources) {
+  const previous = sourceSelect.value;
+  sourceSelect.replaceChildren(Object.assign(item('option', sources.length ? 'Choose a Saved Source' : 'No Saved Sources'), { value: '' }),
+    ...sources.map(({ id, name, type }) => Object.assign(item('option', `${name} · ${labels[type]}`), { value: id })));
+  if (sources.some(({ id }) => id === previous)) sourceSelect.value = previous;
+  sourceSelect.dispatchEvent(new Event('change'));
+}
+sourceSelect.addEventListener('change', () => {
+  savedSourceForm.querySelector('[type=submit]').disabled = $('#remove-source').disabled = !sourceSelect.value;
+});
+form('#saved-source-form', () => command('source', { id: sourceSelect.value }));
+$('#remove-source').addEventListener('click', async () => {
+  if (!sourceSelect.value || !confirm('Remove the Selected Saved Source?')) return;
+  const result = await operate(() => api(`sources/${sourceSelect.value}`, 'DELETE'), 'Saved Source Removed.');
+  if (result) populateSources(result);
+});
+$('#source-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const fields = event.currentTarget.elements;
+  const source = { type: fields.type.value, url: fields.url.value.trim() };
+  if (event.submitter?.id !== 'save-source') return command('source', source);
+  const result = await operate(() => api('sources', 'POST', { ...source, name: fields.name.value.trim() }), 'Source Saved.');
+  if (result) {
+    populateSources(result);
+    sourceSelect.value = result.at(-1).id;
+    sourceSelect.dispatchEvent(new Event('change'));
+    fields.url.value = fields.name.value = '';
+  }
+});
+void api('sources').then(populateSources).catch(() => {});
 const sourceFields = $('#source-form').elements;
 function showSourceInput() {
-  const srt = sourceFields.type.value === 'srt';
-  sourceFields.url.placeholder = srt ? 'srt://encoder:9000?mode=caller' : 'https://server/page.html';
-  $('#source-help').textContent = srt ? 'Use an SRT caller or listener URL.' : 'Enter the HTTP or HTTPS URL for the base webpage.';
+  const type = sourceFields.type.value;
+  const examples = { srt: 'srt://encoder:9000?mode=caller', rtsp: 'rtsp://encoder:554/live', web: 'https://server/page.html' };
+  const instructions = { srt: 'Use an SRT Caller or Listener URL.', rtsp: 'Use the RTSP URL From the Camera or Encoder.', web: 'Use an HTTP or HTTPS URL.' };
+  sourceFields.url.placeholder = examples[type];
+  $('#source-help').textContent = instructions[type];
 }
 sourceFields.type.addEventListener('change', showSourceInput);
 showSourceInput();
@@ -492,7 +681,7 @@ $('#av-form').elements.volume.addEventListener('input', (event) => { $('#volume-
 form('#av-form', (fields, element) => {
   const rotation = Number(fields.rotation.value);
   const restart = fields.output.value !== dashboard?.native?.output || rotation !== (dashboard?.native?.rotation ?? 0);
-  saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked, audioenabled: fields.audioenabled.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
+  saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked, audioenabled: fields.audioenabled.checked, cecremote: fields.cecremote.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
 });
 for (const [selector, power, message] of [['#cec-on', 'on', 'Power On Requested.'], ['#cec-standby', 'standby', 'Standby Requested.']]) {
   $(selector).addEventListener('click', async () => {
@@ -515,6 +704,34 @@ $('#snapshot-dialog').addEventListener('close', () => {
   const image = $('#snapshot-image');
   URL.revokeObjectURL(image.src);
   image.removeAttribute('src');
+});
+$('#ident').addEventListener('click', async () => {
+  const seconds = $('#ident').getAttribute('aria-pressed') === 'true' ? 0 : 10;
+  await operate(() => api('ident', 'POST', { seconds }), seconds ? 'IDENT Shown for 10 Seconds.' : 'IDENT Hidden.');
+  await refresh();
+});
+const networkFields = $('#network-form').elements;
+function showNetworkMode() {
+  const isStatic = networkFields.mode.value === 'static';
+  const grouped = dashboard?.native?.role !== 'standalone';
+  $('#static-network').hidden = $('#static-network').disabled = !isStatic;
+  $('#network-reserve').hidden = isStatic || !grouped;
+  networkFields.reserved.required = !isStatic && grouped;
+  $('#network-note').textContent = dashboard?.native?.networkresult || (grouped ?
+    'Keep This Player’s Group IP. For DHCP, Reserve That IP on Your Router First.' : 'Use the New IP to Reopen the Console After Restart.');
+}
+networkFields.mode.addEventListener('change', showNetworkMode);
+showNetworkMode();
+form('#network-form', async (fields) => {
+  const mode = fields.mode.value;
+  if (!confirm('Apply Ethernet Settings and Restart This Player? Its Console Will Disconnect.')) return;
+  const profile = { mode, confirm: true };
+  if (mode === 'static') {
+    for (const key of ['address', 'netmask', 'gateway']) profile[key] = fields[key].value.trim();
+    profile.dns = fields.dns.value.split(/[\s,]+/).filter(Boolean);
+  } else profile.reserved = fields.reserved.checked;
+  await operate(() => api('network', 'PUT', profile), (result) => result.address ?
+    `Restart Requested. Reopen the Console at ${result.address}:8080.` : 'Restart Requested. Find the Assigned IP on the Startup Screen.');
 });
 $('#role-form').elements.role.addEventListener('change', (event) => {
   const fields = $('#role-form').elements;

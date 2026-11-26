@@ -18,11 +18,15 @@ const sydney = new Intl.DateTimeFormat('sv-SE', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
 
-function clockRequest(port, telemetry = () => {}) {
+function clockRequest(port, telemetry = () => {}, cec = () => {}) {
   let pending;
   port.addEventListener('bsmessage', (reply) => {
     if (reply?.protocol === 'start-syncplayer-playback-v1') {
       telemetry(reply.status, reply.version);
+      return;
+    }
+    if (reply?.protocol === 'start-syncplayer-cec-v1') {
+      cec(reply.action);
       return;
     }
     if (!pending || reply?.protocol !== protocol || reply.id !== pending.id) return;
@@ -122,7 +126,7 @@ function makeServer({ host, port, tls, credentials, requestClock, suite, updates
     if (request.headers.host !== authority) return json(response, 400, { error: 'Use the player address.' });
     const url = new URL(request.url, origin);
     if (url.origin !== origin) return json(response, 400, { error: 'Use the player address.' });
-    if (suite && url.pathname.startsWith('/peer/v1/')) return suite.peer(request, response, url, json);
+    if (suite && url.pathname.startsWith('/peer/v1/')) return suite.peer(request, response, url, json, send);
     const login = /^Basic ([A-Za-z0-9+/=]{4,256})$/i.exec(request.headers.authorization || '');
     const supplied = login ? Buffer.from(login[1], 'base64').toString('utf8') : '';
     const prefix = `${username}:`;
@@ -231,7 +235,7 @@ if (require.main === module) {
       if (running !== 'base' && !healthy && server?.listening && nativeVersion === version) {
         healthy = updates.health().catch(() => { healthy = undefined; });
       }
-    });
+    }, (action) => { void suite?.receiveCec(action); });
     suite = new Suite({ host, config, root: join(card, 'library'), native: requestClock, exchange });
     const updates = new Updates({ root: card, running, version, restart: () => suite.call('ota-restart') });
     server = makeServer({ host, port, tls, credentials, requestClock, suite, updates });
@@ -239,7 +243,9 @@ if (require.main === module) {
     Promise.all([suite.init(), updates.init()]).then(() => {
       server.listen(port, host, () => console.log(`StartWebcast SyncPlayer listening on ${host}:${port}`));
       void suite.refresh();
+      void suite.readMetrics();
       setInterval(() => void suite.refresh(), 5000).unref();
+      setInterval(() => void suite.readMetrics(), 5000).unref();
     }).catch(() => console.error('StartWebcast SyncPlayer could not open SD storage.'));
   } catch {
     console.error('Start SyncPlayer clock server setup failed.');
