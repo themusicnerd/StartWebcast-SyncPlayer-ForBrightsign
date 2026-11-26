@@ -88,8 +88,7 @@ Sub Main()
     Check(not ApplyStaticIPv4(network, profile) And network.sequence = "192.168.1.12/255.255.255.0", "failed setter prevents Apply")
 
     clock = {IsValid: FakeClockValid, GetZoneDateTime: FakeZonedTime, timeValid: true}
-    clock.localTime = {GetHour: FakeHour, GetMinute: FakeMinute, ToIsoString: FakeLocalIso,
-        ToSecondsSinceEpoch: FakeLocalEpoch, hour: 6, minute: 59, date: "20261127000000", epoch: StrToI("1795737600")}
+    clock.localTime = {GetHour: FakeHour, GetMinute: FakeMinute, ToIsoString: FakeLocalIso, hour: 6, minute: 59, date: "20261127T065900,000"}
     beforeWake = ScheduleSample(clock, schedule)
     Check(not beforeWake.wake, "off at 06:59")
     clock.localTime.hour = 7
@@ -116,6 +115,7 @@ Sub Main()
         schedule.week.Push({enabled: true, on: "07:00", off: "21:00"})
     End For
     Check(ValidScheduleWeek(schedule.week), "a complete Monday to Sunday schedule")
+    Check(MondayIndex("20240229") = 3 And MondayIndex("20261228") = 0 And MondayIndex("20270103") = 6, "calendar day indexing crosses leap days and year boundaries")
     schedule.week[4] = {enabled: false, on: "09:00", off: "17:00"}
     friday = ScheduleSample(clock, schedule)
     Check(not friday.wake And friday.wakeMinute = 540, "Friday can be set to standby all day")
@@ -337,10 +337,6 @@ End Function
 
 Function FakeLocalIso() As String
     Return m.date
-End Function
-
-Function FakeLocalEpoch() As Integer
-    Return m.epoch
 End Function
 
 Function FakeStopClear() As Boolean

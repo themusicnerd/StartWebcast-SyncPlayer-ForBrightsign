@@ -12,7 +12,7 @@ const tls = require('node:tls');
 const { performance } = require('node:perf_hooks');
 const { join } = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern, privateDirectory } = require('./library');
+const { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern, maxPatternBytes, patternFile, patternPath, privateDirectory } = require('./library');
 const { Follower, watchPtp } = require('./peers');
 const { Lighting } = require('./dmx');
 const { inspectMp4 } = require('./mp4');
@@ -575,6 +575,7 @@ class Suite {
     this.previews = new Map();
     this.metrics = {};
     this.cardMedia = null;
+    this.patternCue = null;
     this.exchange = exchange;
     this.display = new DisplayControl(root, (wake) => this.call('display-power', { wake }), [host, ...Object.values(this.addresses)]);
     this.scheduledDisplay = undefined;
@@ -792,6 +793,22 @@ class Suite {
     return layout;
   }
 
+  async showPattern(body) {
+    this.ensureLibrary();
+    let files = {};
+    if (body?.id !== 'builtin' && body?.id !== 'hide') {
+      const pattern = this.library.pattern(body?.id);
+      if (!pattern) throw new RequestError(404, 'Test Pattern Not Found.');
+      files = Object.fromEntries(this.activeMembers().map((id) => [id, pattern.files[id] || pattern.files.shared]));
+      if (Object.values(files).some((file) => !file)) throw new RequestError(409, 'Upload a Test Pattern for Every Active Player, or One Shared Image.');
+    }
+    const seconds = body.id === 'hide' ? 0 : -1;
+    const local = files[this.id];
+    await this.call('ident', { mode: 'test-pattern', seconds, pattern: local?.file });
+    this.patternCue = { id: randomBytes(12).toString('hex'), selection: body.id, seconds, files };
+    return { selection: body.id };
+  }
+
   async captureJpeg(kind) {
     const path = join(this.library.root, '..', `suite-${kind}.jpg`);
     try {
@@ -1003,6 +1020,17 @@ class Suite {
 
   async operator(request, response, url, json, send) {
     const path = url.pathname;
+    if (path === '/api/v1/test-patterns') {
+      if (request.method === 'GET') return json(response, 200, { patterns: this.library.patterns(), selection: this.patternCue?.selection || 'hide' });
+      if (request.method === 'POST') return json(response, 202,
+        await this.update(request, async () => this.showPattern(await readJson(request))));
+      if (request.method === 'PUT') {
+        this.ensureLibrary();
+        if (request.headers['content-type'] !== 'application/octet-stream') throw new RequestError(415, 'Upload the Image as an Octet Stream.');
+        const length = Number(request.headers['content-length']);
+        return json(response, 201, await this.update(request, () => this.library.uploadPattern(url.searchParams.get('filename'), request, length)));
+      }
+    }
     if (path === '/api/v1/display-control') {
       if (request.method === 'GET') return json(response, 200, this.display.snapshot());
       if (request.method === 'PUT') return json(response, 200,
@@ -1299,7 +1327,7 @@ class Suite {
   }
 
   async peer(request, response, url, json, send) {
-    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|presentation|seek|transport|layout|preview-rotation|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
+    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|presentation|seek|transport|layout|preview-rotation|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24})(?:\/([a-f0-9]{64}))?|pattern\/([a-f0-9]{24}))$/.exec(url.pathname);
     if (!match || this.status?.role !== 'leader') throw new RequestError(404, 'Peer action unavailable.');
     const player = match[1];
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization || '');
@@ -1331,6 +1359,7 @@ class Suite {
         audio: audio && audio.revision !== native.audiorevision ? audio : undefined,
         capture: admitted && this.previewRequest && performance.now() - this.previewRequest.at < previewInterval ? this.previewRequest.epoch : undefined,
         group,
+        pattern: admitted && this.patternCue ? { id: this.patternCue.id, seconds: this.patternCue.seconds, image: this.patternCue.files[player] } : undefined,
         assignment: admitted ? this.library.assignment(player) : null });
     }
     if (['layout', 'preview-rotation', 'preview', 'capture'].includes(match[2]) || match[3]) {
@@ -1392,13 +1421,26 @@ class Suite {
         return { ok: true };
       }));
     }
+    if (match[6] && request.method === 'GET') {
+      const cue = this.patternCue;
+      const image = cue?.id === match[6] && cue.files[player];
+      if (!this.activeMembers().includes(player) || !image || !patternFile.test(image.file) ||
+          !Number.isSafeInteger(image.length) || image.length > maxPatternBytes) throw new RequestError(404, 'Test Pattern Unavailable.');
+      const file = patternPath(this.library.root, image.file);
+      const entry = await io.lstat(file);
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size !== image.length) throw new RequestError(503, 'Test Pattern File Unavailable.');
+      response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Cache-Control': 'no-store' });
+      await pipeline(fs.createReadStream(file, { flags: fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) }), response);
+      return;
+    }
     if (match[4] && request.method === 'GET') {
       const assignment = this.library.assignment(player, match[4]);
-      if (!assignment) throw new RequestError(404, 'No matching assignment.');
+      const asset = match[5] ? assignment?.assets?.find(({ digest }) => digest === match[5]) : assignment;
+      if (!asset) throw new RequestError(404, 'No matching assignment.');
       if (this.transfers >= 1 || this.library.busy) throw new RequestError(409, 'The transfer slot is busy.');
-      const path = assetPath(this.library.root, assignment.digest);
+      const path = assetPath(this.library.root, asset.digest);
       const entry = await io.lstat(path);
-      if (!entry.isFile() || entry.isSymbolicLink() || entry.size !== assignment.length) throw new RequestError(503, 'The assigned file is unavailable.');
+      if (!entry.isFile() || entry.isSymbolicLink() || entry.size !== asset.length) throw new RequestError(503, 'The assigned file is unavailable.');
       this.transfers++;
       try {
         response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': entry.size, 'Cache-Control': 'no-store' });

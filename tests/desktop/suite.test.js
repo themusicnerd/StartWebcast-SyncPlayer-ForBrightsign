@@ -95,6 +95,8 @@ test('streams drafts, rejects mismatched members and durably replaces only compl
     const revision = manager.list()[0].revisions[0].revision;
     await manager.distribute(draft.id, revision);
     assert.equal(manager.assignment('B').revision, revision);
+    assert.equal(manager.assignment('B').assets.length, 2);
+    assert.deepEqual(manager.assignment('A').assets, manager.assignment('B').assets);
     await assert.rejects(manager.remove(draft.id, revision, []), /clear distribution/);
     await assert.rejects(manager.remove(draft.id, 'all', []), /Clear Distribution/);
     const reopened = new Library(join(root, 'library'), ['A', 'B'], async () => true);
@@ -207,4 +209,25 @@ test('validates weekly hours and makes follower schedules leader-owned', () => {
   assert.throws(() => sanitiseSettings({ week: week.slice(0, 6) }, ['A', 'B'], leader, 'A'), /Monday to Sunday/);
   assert.throws(() => sanitiseSettings(weekly, ['A', 'B'], follower, 'B'), /Schedule on the Leader/);
   assert.deepEqual(sanitiseSettings({ timezone: 'Australia/Adelaide' }, ['A', 'B'], follower, 'B'), { timezone: 'Australia/Adelaide' });
+});
+
+test('assigns uploaded test pattern images by player suffix and retains shared images', async (t) => {
+  const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-patterns-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const library = new Library(root, ['A', 'B', 'C'], async () => true);
+  await library.init();
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lAAAAABJRU5ErkJggg==', 'base64');
+  const add = (name) => library.uploadPattern(name, Readable.from([png]), png.length);
+  const a = await add('Grid_A.png');
+  assert.equal(a.player, 'A');
+  assert.equal(library.patterns()[0].complete, false);
+  await add('Grid_B.png');
+  await add('Grid_C.png');
+  assert.equal(library.patterns()[0].complete, true);
+  assert.deepEqual(Object.keys(library.pattern(a.id).files), ['A', 'B', 'C']);
+  const shared = await add('Full Panel.png');
+  assert.equal(shared.player, 'shared');
+  assert.equal(library.patterns().find((x) => x.id === shared.id).complete, true);
+  await assert.rejects(add('../Grid_A.png'), /PNG or JPEG/);
+  await assert.rejects(library.uploadPattern('broken.png', Readable.from([Buffer.alloc(40)]), 40), /Valid PNG or JPEG/);
 });

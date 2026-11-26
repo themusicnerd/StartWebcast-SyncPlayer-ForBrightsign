@@ -104,6 +104,19 @@
         </form>
         <div class="library-list" id="items"><p class="muted">Presentation is available from Playback.</p></div>
         <div class="actions"><button type="button" class="secondary" id="restore-card-presentation" hidden>Restore SD Presentation</button></div>
+        <article id="test-pattern-library" class="panel stack" hidden>
+          <h3>Test Patterns</h3>
+          <p>Upload one shared PNG or JPEG, or give images matching names with player suffixes such as Grid_A.png, Grid_B.png and Grid_C.png.</p>
+          <form id="test-pattern-upload" class="form-row">
+            <label class="grow">Test Pattern Images<input name="files" type="file" accept="image/png,image/jpeg" multiple required></label>
+            <button type="submit" class="secondary">Upload Test Patterns</button>
+          </form>
+          <form id="test-pattern-group" class="form-row">
+            <label class="grow">Pattern<select name="pattern"><option value="builtin">Built-In Colour Bars</option></select></label>
+            <button type="submit">Show Pattern</button><button id="hide-group-pattern" type="button" class="secondary">Hide Pattern</button>
+          </form>
+          <p class="muted" id="test-pattern-group-state" role="status"></p>
+        </article>
         <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear Distribution</button></div>
       </section>
     </div>
@@ -315,6 +328,9 @@
               <dt>POST <code>/display-power</code></dt><dd>Send <code>{"power":"standby"}</code> or <code>{"power":"on"}</code>. Add <code>"via":"cec"</code> to use HDMI-CEC for this request.</dd>
               <dt>PUT <code>/preview-rotation</code></dt><dd>Send <code>{"player":"B","rotation":90}</code> to save the preview angle across the group.</dd>
               <dt>POST <code>/display-command</code></dt><dd>With Custom TCP or UDP saved, send <code>{"format":"hex","payload":"00 FF"}</code> to the saved destination.</dd>
+              <dt>GET <code>/test-patterns</code></dt><dd>List uploaded test patterns.</dd>
+              <dt>PUT <code>/test-patterns?filename=Grid_A.png</code></dt><dd>Upload a PNG or JPEG as an octet stream.</dd>
+              <dt>POST <code>/test-patterns</code></dt><dd>Send a saved pattern ID in <code>id</code>. Use <code>builtin</code> for colour bars or <code>hide</code> to close the pattern.</dd>
               <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds, or send <code>{"mode":"test-pattern"}</code> to show local colour bars. Send <code>{"seconds":0}</code> to close either screen.</dd>
               <dt>GET <code>/network</code></dt><dd>Read the Ethernet mode, address, mask, gateway and DNS settings.</dd>
               <dt>GET <code>/sources</code></dt><dd>List saved SRT feeds, RTSP feeds and webpages. Send a saved ID to <code>POST /source</code> to start it.</dd>

@@ -106,6 +106,50 @@ async function initStorage(root) {
   }
 }
 
+const patternFile = /^[a-f0-9]{64}\.(?:jpeg|png)$/;
+const maxPatternBytes = 8 * 1024 * 1024;
+
+function patternPath(root, file) {
+  if (!patternFile.test(file)) throw new RequestError(400, 'Invalid Test Pattern File.');
+  return join(root, 'patterns', file);
+}
+
+async function inspectPattern(file, extension) {
+  const handle = await io.open(file, 'r');
+  try {
+    const header = Buffer.alloc(32);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (extension === 'png' && bytesRead >= 24 && header.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) &&
+        header.toString('ascii', 12, 16) === 'IHDR') {
+      const width = header.readUInt32BE(16);
+      const height = header.readUInt32BE(20);
+      if (width > 0 && height > 0 && width <= 4096 && height <= 4096) return;
+    } else if (extension === 'jpeg' && bytesRead >= 4 && header[0] === 255 && header[1] === 216 && header[2] === 255) {
+      const { size } = await handle.stat();
+      const marker = Buffer.alloc(9);
+      let position = 2;
+      while (position + marker.length <= size && position < 512 * 1024) {
+        await handle.read(marker, 0, marker.length, position);
+        if (marker[0] !== 255 || marker[1] === 218 || marker[1] === 217) break;
+        if (marker[1] === 255) { position++; continue; }
+        const segmentLength = marker.readUInt16BE(2);
+        if (segmentLength < 2) break;
+        if ([192, 193, 194].includes(marker[1])) {
+          const height = marker.readUInt16BE(5);
+          const width = marker.readUInt16BE(7);
+          if (width > 0 && height > 0 && width <= 4096 && height <= 4096) {
+            await handle.read(marker, 0, 2, size - 2);
+            if (marker[0] === 255 && marker[1] === 217) return;
+          }
+          break;
+        }
+        position += segmentLength + 2;
+      }
+    }
+    throw new RequestError(422, 'Use a Valid PNG or JPEG Test Pattern. Dimensions Must Be 4096 Pixels or Less.');
+  } finally { await handle.close(); }
+}
+
 function completeDraft(set, members) {
   if (!members.every((member) => set.draft[member])) return false;
   const files = Object.fromEntries(members.map((member) => [member, set.draft[member]]));
@@ -189,6 +233,47 @@ class Library {
     });
   }
 
+  async uploadPattern(rawName, stream, length) {
+    const name = typeof rawName === 'string' ? rawName.normalize('NFC') : '';
+    const match = /^([\p{L}\p{N}][\p{L}\p{M}\p{N} _().-]{0,89}?)(?:[_. -]([a-z]))?\.(png|jpe?g)$/iu.exec(name);
+    if (!match || !match[1].trim()) throw new RequestError(400, 'Use a PNG or JPEG File Name.');
+    const player = match[2]?.toUpperCase() || 'shared';
+    if (player !== 'shared' && !this.members.includes(player)) throw new RequestError(400, 'Choose a Current Player Suffix.');
+    const title = match[1].trim();
+    const id = createHash('sha256').update(title.toLowerCase()).digest('hex').slice(0, 24);
+    const extension = match[3].toLowerCase() === 'png' ? 'png' : 'jpeg';
+    if (!Number.isSafeInteger(length) || length < 32 || length > maxPatternBytes) {
+      throw new RequestError(413, 'Test Patterns Must Be Between 32 Bytes and 8 MB.');
+    }
+    return this.transaction(async (next) => {
+      next.patternSets ||= {};
+      if (!next.patternSets[id] && Object.keys(next.patternSets).length >= 50) throw new RequestError(409, 'The Test Pattern Library Is Full.');
+      if ((await availableBytes(this.root)).freeBytes < length + reserveBytes) throw new RequestError(507, 'The SD Card Does Not Have Enough Free Space.');
+      await privateDirectory(join(this.root, 'patterns'));
+      const stage = join(this.root, 'stage', `${randomBytes(12).toString('hex')}.part`);
+      try {
+        const digest = await receive(stream, stage, length);
+        await inspectPattern(stage, extension);
+        const file = `${digest}.${extension}`;
+        await promote(stage, patternPath(this.root, file), length);
+        const set = next.patternSets[id] || { id, name: title, files: {} };
+        set.files[player] = { file, length };
+        next.patternSets[id] = set;
+        return { id, name: set.name, player };
+      } finally { await io.unlink(stage).catch(() => {}); }
+    });
+  }
+
+  patterns() {
+    return Object.values(this.state.patternSets || {}).map(({ id, name, files }) =>
+      ({ id, name, players: Object.keys(files), complete: this.members.every((player) => files[player] || files.shared) }));
+  }
+
+  pattern(id) {
+    if (!idPattern.test(id || '')) return null;
+    return this.state.patternSets?.[id] || null;
+  }
+
   get(id, revision) {
     if (!idPattern.test(id)) throw new RequestError(404, 'That media set does not exist.');
     const set = this.state.sets[id];
@@ -202,7 +287,7 @@ class Library {
     return this.transaction((next) => {
       const { set, stored } = this.get(id, revision);
       if (!this.covers(stored)) throw new RequestError(409, 'Upload and verify a file for every current group member first.');
-      next.dispatch = { id: set.id, revision: stored.revision };
+      next.dispatch = { id: set.id, revision: stored.revision, replicateAll: true };
       return next.dispatch;
     });
   }
@@ -213,7 +298,9 @@ class Library {
     const { set, stored } = this.get(job.id, job.revision);
     if (!this.covers(stored)) return null;
     const { digest, length } = stored.files[player];
-    return { revision: stored.revision, digest, length, name: set.name };
+    const assets = job.replicateAll ? [...new Map(Object.values(stored.files).map((file) =>
+      [file.digest, { digest: file.digest, length: file.length }])).values()] : undefined;
+    return { revision: stored.revision, digest, length, name: set.name, ...(assets ? { assets } : {}) };
   }
 
   covers(stored) {
@@ -274,4 +361,4 @@ class Library {
 }
 
 module.exports = { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern,
-  hashFile, initStorage, maxAssetBytes, privateDirectory, promote, receive, reserveBytes, safeName };
+  hashFile, initStorage, maxAssetBytes, maxPatternBytes, patternFile, patternPath, privateDirectory, promote, receive, reserveBytes, safeName };

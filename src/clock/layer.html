@@ -18,6 +18,7 @@
     dt{color:#d8c3f1;font-size:1.75vh;margin-bottom:.4vh}
     dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
     #test-pattern{position:absolute;inset:0;background:#000;color:#fff;font:2.4vmin Arial,sans-serif}
+    #uploaded-pattern{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
     .colour-bars{position:absolute;inset:0;display:grid;grid-template-rows:7fr 1fr 1fr 3fr}
     .bars-main{background:linear-gradient(90deg,#666 12.5%,#bfbfbf 12.5% 23.2%,#bfbf00 23.2% 33.9%,#00bfbf 33.9% 44.6%,#00bf00 44.6% 55.4%,#bf00bf 55.4% 66.1%,#bf0000 66.1% 76.8%,#0000bf 76.8% 87.5%,#666 87.5%)}
     .bars-colour{background:linear-gradient(90deg,#00ffff 12.5%,#003f69 12.5% 23.2%,#bfbfbf 23.2% 87.5%,#0000ff 87.5%)}
@@ -60,6 +61,7 @@
   <section id="test-pattern" aria-label="Test Pattern" hidden>
     <div class="colour-bars" aria-hidden="true"><div class="bars-main"></div><div class="bars-colour"></div><div class="bars-ramp"><span></span><span></span><span></span><span></span><span></span></div><div class="bars-black"></div></div>
     <div class="alignment-circle" aria-hidden="true"></div>
+    <img id="uploaded-pattern" alt="" hidden>
     <p id="pattern-output" class="pattern-label"><strong>Test Pattern</strong><span></span></p>
     <p id="pattern-player" class="pattern-label"></p>
   </section>

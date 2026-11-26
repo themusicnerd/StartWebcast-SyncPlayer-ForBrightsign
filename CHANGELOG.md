@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.27
+
+- Add shared PNG and JPEG test patterns and per-player patterns with A/B/C filename suffixes.
+- Copy all cuts in a distributed MP4 revision to each group member while retaining their playback assignments.
+- Include the time zone and weekly schedule features from the 0.2.25 validation build.
+
 ## 0.2.25
 
 - Add a persistent time zone selector for the clock, display schedule and IDENT.

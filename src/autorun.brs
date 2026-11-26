@@ -733,11 +733,12 @@ Function HtmlLayer(url As String, bounds As Object, port As Object, rotation As 
     Return CreateObject("roHtmlWidget", bounds, options)
 End Function
 
-Function ShowStartupCard(panel As Object, kind = "details" As String) As Boolean
+Function ShowStartupCard(panel As Object, kind = "details" As String, pattern = "" As String) As Boolean
     HideStartupCard(panel)
     encoding = CreateObject("roUrlTransfer")
     If encoding = invalid Then Return false
     data = {player: m.playerId, mode: kind, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp, timezone: panel.settings.timezone}
+    If kind = "test-pattern" And pattern <> "" Then data.pattern = "file:/" + panel.root + "library/patterns/" + pattern
     network = panel.network.GetCurrentConfig()
     If Type(network) = "roAssociativeArray" And TextValue(network.ethernet_mac) Then data.mac = network.ethernet_mac
     updater = ParseJson(ReadAsciiFile(panel.root + "updates/github.json"))
@@ -1327,7 +1328,15 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         If body.seconds = 0 Then
             HideStartupCard(panel)
         Else
-            If not ShowStartupCard(panel, body.mode) Then Return "Could Not Show the Requested Screen."
+            pattern = ""
+            If body.pattern <> invalid Then
+                If body.mode <> "test-pattern" Or not TextValue(body.pattern) Then Return "Invalid Test Pattern File."
+                If not SafeHex(Left(body.pattern, 64), 64) Then Return "Invalid Test Pattern File."
+                extension = Mid(body.pattern, 65)
+                If extension <> ".png" And extension <> ".jpeg" Then Return "Invalid Test Pattern File."
+                pattern = body.pattern
+            End If
+            If not ShowStartupCard(panel, body.mode, pattern) Then Return "Could Not Show the Requested Screen."
             panel.identUntil = -1
             If body.seconds > 0 Then panel.identUntil = UpTime(0) + body.seconds
         End If
@@ -1624,6 +1633,17 @@ Function ValidScheduleWeek(week As Dynamic) As Boolean
     Return true
 End Function
 
+Function MondayIndex(date As String) As Integer
+    ' Gregorian month offsets produce a Sunday-based index. Shift to Monday.
+    offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+    year = StrToI(Left(date, 4))
+    month = StrToI(Mid(date, 5, 2))
+    day = StrToI(Right(date, 2))
+    If month < 3 Then year = year - 1
+    count = year + Int(year / 4) - Int(year / 100) + Int(year / 400) + offsets[month - 1] + day + 6
+    Return count - 7 * Int(count / 7)
+End Function
+
 Function ScheduleSample(clock As Dynamic, schedule As Object) As Dynamic
     If clock = invalid Then Return invalid
     If not clock.IsValid() Then Return invalid
@@ -1637,14 +1657,15 @@ Function ScheduleSample(clock As Dynamic, schedule As Object) As Dynamic
     daySchedule = schedule
     enabled = true
     If schedule.scheduleweekly = true Then
-        ' 1 January 1970 was Thursday. The saved week starts on Monday.
-        index = ((localTime.ToSecondsSinceEpoch() \ 86400) + 3) Mod 7
-        daySchedule = schedule.week[index]
+        date = Left(localTime.ToIsoString(), 8)
+        If Len(date) <> 8 Then Return invalid
+        daySchedule = schedule.week[MondayIndex(date)]
         enabled = daySchedule.enabled
     End If
     wakeMinute = MinuteOfDay(daySchedule.on)
-    Return {day: Left(localTime.ToIsoString(), 8), minute: minute, uptime: UpTime(0), wakeMinute: wakeMinute,
-        wake: enabled And minute >= wakeMinute And minute < MinuteOfDay(daySchedule.off)}
+    sample = {day: Left(localTime.ToIsoString(), 8), minute: minute, uptime: UpTime(0), wakeMinute: wakeMinute}
+    sample.wake = enabled And minute >= wakeMinute And minute < MinuteOfDay(daySchedule.off)
+    Return sample
 End Function
 
 Function DailyWakeCrossed(previous As Dynamic, current As Object, wakeMinute As Integer) As Boolean

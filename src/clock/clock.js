@@ -316,6 +316,8 @@ function renderStatus() {
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command^="built-in"]')) button.hidden = dashboard.presentation?.hidden === true;
     $('#upload').hidden = native.role === 'follower';
+    $('#test-pattern-library').hidden = native.role === 'follower';
+    if (native.role !== 'follower' && !patternLibraryLoaded) void refreshPatternLibrary();
     fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false, cecremote: native.cecremote === true });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
@@ -500,7 +502,7 @@ function renderLibrary() {
       row.append(item('p', `${version.video.width} × ${version.video.height} · ${version.video.rate.toFixed(2)} fps · ${version.video.codec} · ${duration(version.seconds)} · ${bytes(version.bytes)} · ${version.revision.slice(0, 8)}`, 'muted'));
       const controls = item('div', undefined, 'actions');
       const selection = { id: set.id, revision: version.revision };
-      if (native?.role === 'leader') controls.append(action('Distribute', () => command('distribute', selection)), action('Play Group', () => command('play', selection)));
+      if (native?.role === 'leader') controls.append(action('Distribute All Files', () => command('distribute', selection)), action('Play Group', () => command('play', selection)));
       if (native?.role !== 'follower') {
         controls.append(action(native?.role === 'standalone' ? 'Play on This Player' : 'Preview on This Player', () => command('play', { ...selection, preview: true })), action('Delete Revision', () => remove(set, version.revision), 'danger'));
       }
@@ -819,6 +821,48 @@ const displayPresetHelp = {
   pjlink: 'Enable PJLink on a compatible display or projector. The default is TCP port 4352. Enter the device’s PJLink password if it requires one.',
 };
 const displayDefaultPorts = { samsung: 1516, hybrid: 1516, sony: 20060, roku: 8060, sharp: 10002, pjlink: 4352 };
+
+let patternLibraryLoaded = false;
+
+async function refreshPatternLibrary() {
+  try {
+    const { patterns, selection } = await api('test-patterns');
+    const select = $('#test-pattern-group').elements.pattern;
+    const previous = select.value;
+    select.replaceChildren(new Option('Built-In Colour Bars', 'builtin'), ...patterns.map((pattern) => {
+      const option = new Option(pattern.complete ? pattern.name : `${pattern.name} · Incomplete`, pattern.id);
+      option.disabled = !pattern.complete;
+      return option;
+    }));
+    if ([...select.options].some((option) => option.value === previous && !option.disabled)) select.value = previous;
+    $('#test-pattern-group-state').textContent = selection === 'hide' ? '' : 'Pattern Requested on the Group.';
+    patternLibraryLoaded = true;
+  } catch { /* Refresh when the player is ready. */ }
+}
+
+$('#test-pattern-upload').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const files = [...form.elements.files.files];
+  const result = await operate(async () => {
+    for (const file of files) {
+      const response = await fetch(`/api/v1/test-patterns?filename=${encodeURIComponent(file.name)}`, {
+        method: 'PUT', headers: { ...updateHeaders, 'Content-Type': 'application/octet-stream' }, body: file,
+      });
+      if (!response.ok) throw new Error((await response.json()).error || 'Test Pattern Upload Failed.');
+    }
+    return true;
+  }, 'Test Patterns Uploaded.', form);
+  if (result) form.reset();
+  await refreshPatternLibrary();
+});
+
+async function changeGroupPattern(id) {
+  const result = await operate(() => api('test-patterns', 'POST', { id }));
+  if (result) await refreshPatternLibrary();
+}
+form('#test-pattern-group', (fields) => changeGroupPattern(fields.pattern.value));
+$('#hide-group-pattern').addEventListener('click', () => changeGroupPattern('hide'));
 
 function renderDisplayControl(display = dashboard?.displayControl) {
   const form = $('#display-control-form');

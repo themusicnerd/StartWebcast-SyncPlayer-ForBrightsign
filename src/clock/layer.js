@@ -26,6 +26,15 @@ function showStartup(data) {
   lower.remove();
   upper.remove();
   if (data.mode === 'test-pattern') {
+    if (data.pattern) {
+      const image = document.querySelector('#uploaded-pattern');
+      image.addEventListener('load', () => {
+        image.hidden = false;
+        document.querySelector('.colour-bars').hidden = true;
+        document.querySelector('.alignment-circle').hidden = true;
+      }, { once: true });
+      image.src = data.pattern;
+    }
     document.querySelector('#pattern-player').textContent = `Player ${data.player}`;
     document.querySelector('#pattern-output span').textContent = `${data.output} · ${data.rotation}°`;
     document.querySelector('#test-pattern').hidden = false;

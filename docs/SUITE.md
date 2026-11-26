@@ -68,6 +68,12 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 
 Use the rotate button on a player preview to turn the preview clockwise by 90°. The group saves the angle by player, including when you rearrange the grid. A quarter-turn displays the preview in a 9:16 frame.
 
+### Test Patterns and Complete Media Copies
+
+Use **Test Patterns** in the media library. Select **Built-In Colour Bars** or upload PNG and JPEG images up to 8 MB and 4096 pixels per side. A file without a player suffix is shared. Files such as `Grid_A.png`, `Grid_B.png` and `Grid_C.png` form one pattern for the group. Select **Show Pattern** to put it over the current content. Select **Hide Pattern** to remove it. The top-bar Test Pattern button can still show local colour bars.
+
+Select **Distribute All Files** on a verified MP4 revision to send every distinct cut to each active player. Each player verifies the files and plays the cut assigned by its suffix. Extra copies need SD card space. The SD presentation remains installed through its existing card paths.
+
 ### Weekly Display Schedule
 
 Save the time zone on the leader or standalone player. Select **Use Weekly Hours** for separate Monday to Sunday hours. Clear a day to keep its display in standby. Use **Observe Daylight Saving** to follow the selected zone’s seasonal clock changes. Clear it to keep standard time year-round. **Restart Content at Daily Wake** starts the presentation or active source from the beginning once at the scheduled wake. Followers display the leader’s settings and use its playback cue. The local time zone on a follower applies to its own console and IDENT.
