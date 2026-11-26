@@ -1,7 +1,7 @@
 Sub Main()
     m.root = GetDefaultDrive()
     m.bootReport = ""
-    BootNote("StartWebcast SyncPlayer 0.2.4 card boot")
+    BootNote("StartWebcast SyncPlayer card boot")
     port = CreateObject("roMessagePort")
     StartCard(port)
     While true
@@ -59,8 +59,50 @@ Sub StartCard(port As Object)
             Return
         End If
     End If
-    BootNote("Loading playback.brs")
-    Run(m.root + "playback.brs")
+    slot = SelectUpdateSlot()
+    RunCardSlot(slot)
+    If slot <> "base" Then RunCardSlot("base")
+End Sub
+
+Function UsableUpdateSlot(slot As Dynamic) As Boolean
+    If not BootText(slot) Then Return false
+    parts = slot.Split(".")
+    If parts.Count() <> 3 Then Return false
+    For Each part In parts
+        If Len(part) = 0 Or Len(part) > 4 Then Return false
+        If Len(part) > 1 And Left(part, 1) = "0" Then Return false
+        For i = 1 To Len(part)
+            If Instr(1, "0123456789", Mid(part, i, 1)) = 0 Then Return false
+        End For
+    End For
+    root = m.root + "updates/slots/" + slot + "/"
+    Return ReadAsciiFile(root + "package.json") <> "" And ReadAsciiFile(root + "VERSION").Trim() = slot
+End Function
+
+Function SelectUpdateSlot() As String
+    state = ParseJson(ReadAsciiFile(m.root + "updates/active.json"))
+    If Type(state) <> "roAssociativeArray" Then Return "base"
+    If state.slot = "base" Then Return "base"
+    If UsableUpdateSlot(state.slot) Then
+        root = m.root + "updates/slots/" + state.slot + "/"
+        If ReadAsciiFile(root + "healthy.txt") = "yes" Then Return state.slot
+        If ReadAsciiFile(root + "attempt.txt") = "" Then
+            If WriteAsciiFile(root + "attempt.txt", "yes") Then Return state.slot
+        End If
+        BootNote("UPDATE_BOOT_FALLBACK " + state.slot)
+    End If
+    If UsableUpdateSlot(state.previous) Then
+        If ReadAsciiFile(m.root + "updates/slots/" + state.previous + "/healthy.txt") = "yes" Then Return state.previous
+    End If
+    Return "base"
+End Function
+
+Sub RunCardSlot(slot As String)
+    runtime = m.root
+    If slot <> "base" Then runtime = m.root + "updates/slots/" + slot + "/"
+    If not WriteAsciiFile(m.root + "suite-launch.txt", slot) And slot <> "base" Then Return
+    BootNote("Loading playback.brs from " + slot)
+    Run(runtime + "playback.brs")
     compileErrors = GetLastRunCompileError()
     If compileErrors <> invalid Then
         For Each detail In compileErrors

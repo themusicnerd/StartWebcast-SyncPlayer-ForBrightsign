@@ -37,6 +37,8 @@ npm exec --yes --package=brighterscript@0.73.8 -- bsc --no-project --files src/a
 node --test tests/desktop/*.test.js
 ```
 
+The presentation-card console includes native playback controls, group membership, Sydney display scheduling, HDMI-CEC and screen snapshots. See the operator guide for the console and the update guide for signed local and GitHub app updates. [Console Guide](docs/SUITE.md) · [App Updates](docs/UPDATES.md)
+
 ## Configuration
 
 The source is `config/syncplayer.json`. To produce a different common SD build, pass `--config path/to/syncplayer.json`. Keep membership, group, PTP domain and loop mode identical across every card on a bench. Configurable membership is supported by the package generator. The intended hardware test is three units.

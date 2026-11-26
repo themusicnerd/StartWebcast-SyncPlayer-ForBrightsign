@@ -1,4 +1,17 @@
 Sub Main()
+    m.runtime = GetDefaultDrive()
+    m.slot = "base"
+    m.updateDeadline = 0
+    slot = ReadAsciiFile(m.runtime + "suite-launch.txt")
+    If slot <> "" And slot <> "base" Then
+        path = m.runtime + "updates/slots/" + slot + "/"
+        If ReadAsciiFile(path + "VERSION").Trim() = slot Then
+            m.slot = slot
+            m.runtime = path
+            If ReadAsciiFile(path + "healthy.txt") <> "yes" Then m.updateDeadline = UpTime(0) + 120
+        End If
+    End If
+    m.version = ReadAsciiFile(m.runtime + "VERSION").Trim()
     m.systemLog = CreateObject("roSystemLog")
     m.playerId = ""
     port = CreateObject("roMessagePort")
@@ -11,6 +24,7 @@ Sub Main()
     While true
         HandleClockWeb(Wait(500, port))
         If m.panel <> invalid Then PanelRestart(m.panel)
+        CheckUpdateBoot()
     End While
 End Sub
 
@@ -80,7 +94,7 @@ Sub RunPlayback(port As Object)
     m.clock = clock
     If scheduled And cardId = m.playerId And clock <> invalid Then
         If ReadAsciiFile(root + "clock/credentials.json") <> "" Then
-            m.clockWeb = CreateObject("roNodeJs", root + "clock/server.js", {message_port: port, arguments: [address]})
+            m.clockWeb = CreateObject("roNodeJs", m.runtime + "clock/server.js", {message_port: port, arguments: [address, m.slot]})
             If m.clockWeb = invalid Then LogEvent("WEB_INTERFACE_UNAVAILABLE", {})
         End If
     End If
@@ -224,6 +238,8 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     If scheduled Then
         settings.on = config.display_schedule.on
         settings.off = config.display_schedule.off
+        settings.scheduleenabled = true
+        If BooleanValue(config.display_schedule.enabled) Then settings.scheduleenabled = config.display_schedule.enabled
     End If
     registry = CreateObject("roRegistrySection", "StartSyncPlayerSuite")
     If registry <> invalid And scheduled Then
@@ -245,6 +261,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
     panel.memberUntil = 0
     panel.telemetryAt = 0
+    panel.cecRequest = ""
     Return panel
 End Function
 
@@ -258,8 +275,19 @@ Function SavePanel(panel As Object, settings As Object) As Boolean
 End Function
 
 Function PanelStatus(panel As Object) As Object
-    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: "0.2.4"}
+    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: m.version}
     data.colour = panel.colour
+    data.scheduleenabled = panel.settings.scheduleenabled
+    data.cecavailable = panel.cec <> invalid
+    data.cecrequest = panel.cecRequest
+    data.tvpower = "unknown"
+    hdmi = panel.mode.GetHdmiOutputStatus()
+    If Type(hdmi) = "roAssociativeArray" Then
+        If hdmi.output_present = true And BooleanValue(hdmi.output_powered) Then
+            data.tvpower = "off"
+            If hdmi.output_powered Then data.tvpower = "on"
+        End If
+    End If
     playback = PanelPlayback(panel)
     For Each key In playback
         data[key] = playback[key]
@@ -402,7 +430,7 @@ End Function
 Function LayerDocument(panel As Object, base As String) As String
     encode = CreateObject("roUrlTransfer")
     If encode = invalid Then Return ""
-    url = "file:/" + panel.root + "clock/layer.html?overlay=" + encode.Escape(panel.settings.overlay)
+    url = "file:/" + m.runtime + "clock/layer.html?overlay=" + encode.Escape(panel.settings.overlay)
     If base <> "" Then url = url + "&base=" + encode.Escape(base) + "&rect=" + encode.Escape(FormatJson(panel.settings.rect))
     Return url
 End Function
@@ -531,12 +559,13 @@ Function StartPanel(panel As Object) As Boolean
 End Function
 
 Sub PanelTick(panel As Object)
+    CheckUpdateBoot()
     PanelRestart(panel)
     PanelHtmlFeedback(panel)
     now = UpTime(0)
     If m.clockWeb <> invalid And now >= panel.telemetryAt Then
         panel.telemetryAt = now + 1
-        m.clockWeb.PostJsMessage({protocol: "start-syncplayer-playback-v1", status: FormatJson(PanelPlayback(panel))})
+        m.clockWeb.PostJsMessage({protocol: "start-syncplayer-playback-v1", status: FormatJson(PanelPlayback(panel)), version: m.version})
     End If
     If panel.state = "starting" And panel.loadAt > 0 And UpTime(0) > panel.loadAt + 20 Then
         panel.state = "error"
@@ -544,7 +573,7 @@ Sub PanelTick(panel As Object)
     End If
     If panel.role = "follower" Or UpTime(0) < panel.readyAt Then Return
     allowed = true
-    If panel.scheduled Then allowed = ScheduleAllows(panel.clock, panel.settings)
+    If panel.scheduled And panel.settings.scheduleenabled Then allowed = ScheduleAllows(panel.clock, panel.settings)
     If panel.before = invalid Or panel.before <> allowed Then
         panel.before = allowed
         panel.screens = allowed
@@ -661,12 +690,22 @@ Sub PanelVideoEvent(panel As Object, code As Integer)
     End If
 End Sub
 
+Sub CheckUpdateBoot()
+    If m.updateDeadline = 0 Then Return
+    If ReadAsciiFile(m.runtime + "healthy.txt") = "yes" Then
+        m.updateDeadline = 0
+    Else If UpTime(0) >= m.updateDeadline Then
+        LogEvent("UPDATE_HEALTH_TIMEOUT", {})
+        RebootSystem()
+    End If
+End Sub
+
 Sub PanelRestart(panel As Object)
     If panel.rebootAt = 0 Or UpTime(0) < panel.rebootAt Then Return
     panel.rebootAt = 0
     change = panel.change
     panel.change = ""
-    If change = "role-or-ptp" Then
+    If change = "role-or-ptp" Or change = "app-update" Then
         RebootSystem()
     Else If change = "video-mode" Then
         If panel.mode.SetMode(panel.settings.output) Then Return
@@ -708,7 +747,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.domain < 0 Or nextSettings.domain > 127 Or nextSettings.volume < 0 Or nextSettings.volume > 100 Then Return "Setting out of range."
     If not ValidPanelGroup(nextSettings.group) Or not ValidPanelRect(nextSettings.rect) Or not BooleanValue(nextSettings.muted) Then Return "Invalid group or video window."
     If nextSettings.output <> "3840x2160x50p" And nextSettings.output <> "1920x1080x50p" Then Return "Unsupported HDMI mode."
-    If panel.scheduled And (MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
+    If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
     If nextSettings.overlay <> "" And not PanelWebUrl(nextSettings.overlay) Then Return "Invalid overlay URL."
     If nextSettings.ntp <> panel.settings.ntp Or nextSettings.interval <> panel.settings.interval Then
         If nextSettings.interval <> 0 And (nextSettings.interval < 120 Or nextSettings.interval > 86400) Then Return "Invalid NTP interval."
@@ -747,7 +786,12 @@ Function PanelSet(panel As Object, patch As Object) As String
 End Function
 
 Function PanelCommand(panel As Object, action As String, body As Object) As String
-    If action = "probe" Then
+    If action = "ota-restart" Then
+        If panel.change <> "" Then Return "A Device Restart Is Already Pending."
+        panel.change = "app-update"
+        panel.rebootAt = UpTime(0) + 3
+        Return ""
+    Else If action = "probe" Then
         If VerifiedAsset(panel, body.asset) Then Return ""
         Return "The native file probe rejected this media."
     Else If action = "settings" Then
@@ -769,6 +813,18 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
     End If
     If not panel.ready Then Return "Native playback is still starting."
     If panel.change <> "" Then Return "The device is about to restart."
+    If action = "snapshot" Then
+        If not panel.mode.Screenshot({filename: panel.root + "suite-snapshot.jpg", width: 960, height: 540, filetype: "JPEG", quality: 80, async: 0}) Then Return "Could Not Capture the Player Output."
+        Return ""
+    End If
+    If action = "display-power" Then
+        If panel.cec = invalid Then Return "HDMI-CEC Is Unavailable on This Player."
+        If not BooleanValue(body.wake) Then Return "Choose Power On or Standby."
+        SendDisplayCec(panel.cec, body.wake)
+        panel.cecRequest = "standby"
+        If body.wake Then panel.cecRequest = "on"
+        Return ""
+    End If
     If action = "pause" Or action = "resume" Then
         playback = PanelPlayback(panel)
         If not playback.pausable Then Return "Play an MP4 to use this transport control."
@@ -972,7 +1028,10 @@ Sub SetDisplayState(video As Object, cec As Dynamic, wake As Boolean)
         If m.holding <> invalid Then m.holding.Hide()
     End If
     If cec = invalid Then Return
+    SendDisplayCec(cec, wake)
+End Sub
 
+Sub SendDisplayCec(cec As Object, wake As Boolean)
     ' Low nibble 0 addresses the TV. BrightSign supplies the initiator nibble.
     packet = CreateObject("roByteArray")
     If wake Then
@@ -1137,7 +1196,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.2.4"
+    fields.version = m.version
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)

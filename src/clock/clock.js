@@ -4,7 +4,8 @@ const $ = (selector) => document.querySelector(selector);
 const updateHeaders = { 'Content-Type': 'application/json', 'X-SyncPlayer-Request': 'control' };
 const dateFormat = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'long' });
 const inputFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const labels = { 'built-in': 'Built-in presentation', 'built-in-local': 'Local presentation', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local preview' };
+const labels = { 'built-in': 'Built-In Presentation', 'built-in-local': 'Local Presentation', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
+const states = { booting: 'Booting', idle: 'Idle', starting: 'Starting', playing: 'Playing', paused: 'Paused', stopped: 'Stopped', standby: 'Standby', ended: 'Ended', error: 'Error', blackout: 'Blackout', 'outside group': 'Outside Group', online: 'Online', offline: 'Offline', local: 'Local' };
 let dashboard;
 let library = [];
 let sample;
@@ -24,7 +25,9 @@ function showMessage(message, error = false) {
 }
 
 async function api(path, method = 'GET', input) {
-  const options = method === 'GET' ? undefined : { method, headers: updateHeaders, body: JSON.stringify(input || {}) };
+  const options = method === 'GET' ? undefined : input instanceof File ?
+    { method, headers: { ...updateHeaders, 'Content-Type': 'application/octet-stream' }, body: input } :
+    { method, headers: updateHeaders, body: JSON.stringify(input || {}) };
   const response = await fetch(`/api/v1/${path}`, options);
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || `Player returned HTTP ${response.status}`);
@@ -94,7 +97,7 @@ function drawWindow(rect) {
 function renderPlayback(current) {
   if (!current) return;
   playback = current;
-  $('#playback-state').textContent = current.pending ? 'Restart pending' : current.state;
+  $('#playback-state').textContent = current.pending ? 'Restart Pending' : (states[current.state] || current.state);
   $('#playback-state').dataset.state = current.state;
   $('#playback-error').textContent = current.error || dashboard?.problem || '';
   $('#source-name').textContent = current.name;
@@ -121,6 +124,12 @@ async function refreshPlayback() {
   finally { readingPlayback = false; }
 }
 
+async function changeMembership(id, included) {
+  await operate(() => api(`group/members/${id}`, 'PUT', { included }), `Player ${id} ${included ? 'Added to the Group' : 'Removed From the Group'}.`);
+  await refresh();
+  await refreshLibrary();
+}
+
 function renderMembership(players, native) {
   const group = $('#group-members');
   const snapshot = JSON.stringify(players.map(({ id, member, manageable }) => [id, member, manageable]));
@@ -130,37 +139,47 @@ function renderMembership(players, native) {
   const rows = players.map((player) => {
     const row = item('div', undefined, 'membership-row');
     const text = item('div');
-    text.append(item('strong', `Player ${player.id}`), item('p', !player.member ? 'Outside this group' : player.id === native?.playerid ? 'Local player' : 'Group member'));
+    text.append(item('strong', `Player ${player.id}`), item('p', !player.member ? 'Outside the Group' : player.id === native?.playerid ? 'Local Player' : 'Group Member'));
     row.append(text);
-    if (player.manageable) {
-      const included = !player.member;
-      const button = action(included ? 'Add to group' : 'Remove from group', async () => {
-        const name = `Player ${player.id}`;
-        if (!included && !confirm(`Remove ${name} from the active playback group?`)) return;
-        await operate(() => api(`group/members/${player.id}`, 'PUT', { included }), included ? `${name} added to the group.` : `${name} removed from the group.`);
-        await refresh();
-        await refreshLibrary();
+    if (player.manageable && player.member) {
+      const button = action('Remove From Group', async () => {
+        if (confirm(`Remove Player ${player.id} From the Active Playback Group?`)) await changeMembership(player.id, false);
       });
       button.dataset.member = player.id;
-      button.setAttribute('aria-label', `${included ? 'Add' : 'Remove'} Player ${player.id} ${included ? 'to' : 'from'} the group`);
+      button.setAttribute('aria-label', `Remove Player ${player.id} From the Group`);
       row.append(button);
     }
     return row;
   });
   group.replaceChildren(...rows);
+  const form = $('#member-form');
+  form.hidden = native?.role !== 'leader';
+  const select = form.elements.player;
+  const available = players.filter((player) => player.manageable && !player.member);
+  const previous = select.value;
+  select.replaceChildren(new Option(available.length ? 'Select a Player' : 'No Available Players', ''),
+    ...available.map(({ id, address }) => new Option(`Player ${id}${address ? ` · ${address}` : ''}`, id)));
+  if (available.some(({ id }) => id === previous)) select.value = previous;
+  select.disabled = form.querySelector('button').disabled = !available.length;
+  $('#member-help').textContent = 'Players Appear Here After Provisioning and Removal From the Group.';
   if (focused) group.querySelector(`[data-member="${focused}"]`)?.focus();
 }
 
 function renderStatus() {
   const { native, players, storage, events, ptp, dispatch, lighting } = dashboard;
-  $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native player starting';
+  $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native Player Starting';
   $('#connection').dataset.state = 'online';
   if (native) {
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
     if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = native.role === 'follower' ? 'Follower audio is muted. The leader supplies HDMI audio.' : 'Volume controls the native video and SRT audio.';
-    $('#layout-label').textContent = `${labels[native.source] || 'Lower layer'}${native.overlay ? ' + HTML5 overlay' : ''}`;
+    $('#cec-on').disabled = $('#cec-standby').disabled = !native.cecavailable;
+    $('#snapshot').disabled = native.state === 'booting';
+    const power = { on: 'TV On', off: 'TV Off', unknown: 'TV Unknown' };
+    $('#tv-power').textContent = power[native.tvpower] || power.unknown;
+    $('#tv-power').dataset.state = native.tvpower || 'unknown';
+    $('#layout-label').textContent = `${labels[native.source] || 'Lower Layer'}${native.overlay ? ' + HTML5 overlay' : ''}`;
     $('#overlay-state').textContent = native.overlaystate;
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
@@ -168,7 +187,9 @@ function renderStatus() {
     fill('#av-form', { output: native.requestedoutput, volume: native.volume, muted: native.muted });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
-    fill('#schedule-form', native);
+    fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
+    $('#schedule-help').textContent = native.role === 'follower' ? 'This Follower Uses the Leader’s Schedule During Group Playback.' :
+      'Disabling the Schedule Lets Playback Run at Any Time.';
     fill('#ntp-form', native);
     fill('#colour-form', native.colour || {});
     const roleForm = $('#role-form');
@@ -194,7 +215,7 @@ function renderStatus() {
     const info = player.status;
     const card = item('div', undefined, 'player');
     const top = item('div', undefined, 'panel-heading');
-    const status = item('span', player.connection, 'status-pill');
+    const status = item('span', states[player.connection] || player.connection, 'status-pill');
     status.dataset.state = player.connection;
     top.append(item('strong', player.id), status);
     const link = item('a', player.ip);
@@ -232,6 +253,9 @@ async function refresh() {
   } catch (error) {
     $('#connection').textContent = 'Disconnected';
     $('#connection').dataset.state = 'offline';
+    $('#tv-power').textContent = 'TV Unknown';
+    $('#tv-power').dataset.state = 'unknown';
+    $('#cec-on').disabled = $('#cec-standby').disabled = $('#snapshot').disabled = true;
   }
 }
 
@@ -259,8 +283,8 @@ function renderLibrary() {
       row.append(item('p', `Draft · Files verified for ${set.draft.join(', ')}`, 'muted'));
       if (native?.role !== 'follower') {
         const controls = item('div', undefined, 'actions');
-        if (set.draft.includes(native?.playerid)) controls.append(action(native.role === 'standalone' ? 'Play on this player' : 'Preview on this player', () => command('play', { id: set.id, preview: true })));
-        controls.append(action('Delete draft', () => remove(set, 'draft'), 'danger'));
+        if (set.draft.includes(native?.playerid)) controls.append(action(native.role === 'standalone' ? 'Play on This Player' : 'Preview on This Player', () => command('play', { id: set.id, preview: true })));
+        controls.append(action('Delete Draft', () => remove(set, 'draft'), 'danger'));
         row.append(controls);
       }
       card.append(row);
@@ -270,9 +294,9 @@ function renderLibrary() {
       row.append(item('p', `${version.video.width} × ${version.video.height} · ${version.video.rate.toFixed(2)} fps · ${version.video.codec} · ${duration(version.seconds)} · ${bytes(version.bytes)} · ${version.revision.slice(0, 8)}`, 'muted'));
       const controls = item('div', undefined, 'actions');
       const selection = { id: set.id, revision: version.revision };
-      if (native?.role === 'leader') controls.append(action('Distribute', () => command('distribute', selection)), action('Play group', () => command('play', selection)));
+      if (native?.role === 'leader') controls.append(action('Distribute', () => command('distribute', selection)), action('Play Group', () => command('play', selection)));
       if (native?.role !== 'follower') {
-        controls.append(action(native?.role === 'standalone' ? 'Play on this player' : 'Preview on this player', () => command('play', { ...selection, preview: true })), action('Delete revision', () => remove(set, version.revision), 'danger'));
+        controls.append(action(native?.role === 'standalone' ? 'Play on This Player' : 'Preview on This Player', () => command('play', { ...selection, preview: true })), action('Delete Revision', () => remove(set, version.revision), 'danger'));
       }
       row.append(controls);
       card.append(row);
@@ -406,6 +430,28 @@ $('#clear-overlay').addEventListener('click', () => {
 });
 $('#av-form').elements.volume.addEventListener('input', (event) => { $('#volume-label').textContent = `${event.target.value}%`; });
 form('#av-form', (fields, element) => saveSettings(element, { output: fields.output.value, volume: Number(fields.volume.value), muted: fields.muted.checked }, fields.output.value !== dashboard?.native?.output ? 'Apply the new HDMI mode and restart playback?' : undefined));
+for (const [selector, power, message] of [['#cec-on', 'on', 'Power On Requested.'], ['#cec-standby', 'standby', 'Standby Requested.']]) {
+  $(selector).addEventListener('click', async () => {
+    await operate(() => api('display-power', 'POST', { power }), message);
+    await refresh();
+  });
+}
+
+$('#snapshot').addEventListener('click', async () => {
+  const snapshot = await operate(async () => {
+    const response = await fetch('/api/v1/snapshot', { method: 'POST', headers: updateHeaders, body: '{}' });
+    if (!response.ok) throw new Error((await response.json()).error || 'Could Not Capture the Player Output.');
+    return response.blob();
+  });
+  if (!snapshot) return;
+  $('#snapshot-image').src = URL.createObjectURL(snapshot);
+  $('#snapshot-dialog').showModal();
+});
+$('#snapshot-dialog').addEventListener('close', () => {
+  const image = $('#snapshot-image');
+  URL.revokeObjectURL(image.src);
+  image.removeAttribute('src');
+});
 $('#role-form').elements.role.addEventListener('change', (event) => {
   const fields = $('#role-form').elements;
   fields.leader.disabled = event.target.value !== 'follower';
@@ -417,7 +463,8 @@ form('#role-form', (fields, element) => {
   const leader = role === 'leader' ? dashboard?.native?.playerid : fields.leader.value;
   saveSettings(element, { role, leader, domain: Number(fields.domain.value), group: fields.group.value }, 'Apply these role and PTP settings? Changed settings restart this player.');
 });
-form('#schedule-form', (fields, element) => saveSettings(element, { on: fields.on.value, off: fields.off.value }));
+form('#schedule-form', (fields, element) => saveSettings(element, { on: fields.on.value, off: fields.off.value, scheduleenabled: fields.enabled.checked }));
+form('#member-form', (fields) => { if (fields.player.value) void changeMembership(fields.player.value, true); });
 form('#ntp-form', (fields, element) => saveSettings(element, { ntp: fields.ntp.value.trim(), interval: Number(fields.interval.value) }));
 form('#colour-form', async (fields, element) => {
   const colour = Object.fromEntries(['brightness', 'hue', 'saturation'].map((key) => [key, Number(fields[key].value)]));
@@ -440,6 +487,86 @@ form('#slot-form', async (fields, element) => {
 });
 $('#computer').addEventListener('click', () => clock({ utc: new Date().toISOString() }));
 form('#manual', () => clock({ sydney: $('#sydney').value }));
+
+let updateState;
+
+function renderUpdates(state) {
+  updateState = state;
+  fill('#update-github', state.source);
+  $('#update-status').textContent = state.pending ? 'Restart Requested' : `Version ${state.version}`;
+  $('#update-detail').textContent = state.pending ? 'Waiting for the Player to Restart.' : state.fallback ?
+    `Version ${state.selected} Could Not Start. Running the Previous Version.` : state.staged ?
+    `Version ${state.staged} Is Staged and Ready to Install.` : state.trusted ?
+      'Choose a Signed Package From a Local File or GitHub.' : 'Install the Update Verification Key to Enable App Updates.';
+  $('#update-activate').disabled = !state.staged || state.pending;
+  $('#update-rollback').disabled = !state.rollback || state.pending;
+  $('#update-file button').disabled = $('#update-download').disabled = $('#update-browser').disabled = !state.trusted || state.pending;
+}
+
+async function refreshUpdates() {
+  try { renderUpdates(await api('updates')); }
+  catch { if (!updateState?.pending) $('#update-status').textContent = 'Update Status Unavailable'; }
+}
+
+form('#update-file', async (fields, element) => {
+  const file = fields.package.files[0];
+  if (!file) return;
+  const result = await operate(() => api('updates/package', 'PUT', file), 'Update Package Staged.', element);
+  if (result) { element.reset(); renderUpdates(result); }
+});
+
+async function browserPackage({ repository, branch }, token) {
+  const url = new URL(`https://api.github.com/repos/${repository}/contents/updates/StartWebcast-SyncPlayer.swu`);
+  url.searchParams.set('ref', `refs/heads/${branch}`);
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(16000),
+    headers: { Accept: 'application/vnd.github.raw+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
+  if (!response.ok) throw new Error(`GitHub Returned HTTP ${response.status}. Check the Repository, Branch, Package and Read Access.`);
+  const reader = response.body.getReader();
+  const chunks = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 2 * 1024 * 1024) throw new Error('The Update Package Exceeds 2 MiB.');
+      chunks.push(value);
+    }
+    return new File(chunks, 'StartWebcast-SyncPlayer.swu', { type: 'application/octet-stream' });
+  } finally { await reader.cancel(); }
+}
+
+$('#update-github').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const source = { repository: form.elements.repository.value.trim(), branch: form.elements.branch.value.trim() };
+  const browser = event.submitter?.id === 'update-browser';
+  const download = browser || event.submitter?.id === 'update-download';
+  const result = await operate(async () => {
+    const state = await api('updates/github', 'PUT', source);
+    if (!download) return state;
+    const token = form.elements.token.value.trim();
+    form.elements.token.value = '';
+    if (browser) return api('updates/package', 'PUT', await browserPackage(state.source, token));
+    return api('updates/download', 'POST', { token });
+  }, download ? 'GitHub Package Staged.' : 'GitHub Source Saved.', form);
+  if (result) renderUpdates(result);
+});
+$('#update-github').addEventListener('input', (event) => { event.currentTarget.dataset.dirty = '1'; });
+
+for (const [selector, actionName, prompt] of [
+  ['#update-activate', 'activate', 'Install the Staged App Update and Restart This Player?'],
+  ['#update-rollback', 'rollback', 'Restore the Previous App Version and Restart This Player?'],
+]) {
+  $(selector).addEventListener('click', async () => {
+    if (!confirm(prompt)) return;
+    const result = await operate(() => api(`updates/${actionName}`, 'POST'), 'Restart Requested.');
+    if (result) renderUpdates(result);
+  });
+}
+
+refreshUpdates();
+setInterval(refreshUpdates, 5000);
 setInterval(showTime, 1000);
 setInterval(refreshPlayback, 1000);
 setInterval(refresh, 5000);

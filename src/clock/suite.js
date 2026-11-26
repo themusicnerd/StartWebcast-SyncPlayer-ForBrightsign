@@ -55,12 +55,13 @@ function sourceUrl(value, type) {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'output', 'ntp', 'interval', 'on', 'off', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'output', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
   if ('volume' in safe && (!Number.isInteger(safe.volume) || safe.volume < 0 || safe.volume > 100)) throw new RequestError(400, 'Volume must be between 0 and 100.');
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
+  if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
   if ('ntp' in safe && safe.ntp !== current?.ntp) safe.ntp = networkTimeServer(safe.ntp);
   if ('interval' in safe && (!Number.isInteger(safe.interval) || (safe.interval !== 0 && (safe.interval < 120 || safe.interval > 86400)))) {
@@ -284,8 +285,22 @@ class Suite {
     } finally { this.mutation = false; }
   }
 
-  async operator(request, response, url, json) {
+  async operator(request, response, url, json, send) {
     const path = url.pathname;
+    if (path === '/api/v1/snapshot' && request.method === 'POST') {
+      if (request.headers['idempotency-key']) throw new RequestError(400, 'Snapshots Use a New Capture for Each Request.');
+      await readJson(request);
+      const bytes = await this.update(request, async () => {
+        const file = join(this.library.root, '..', 'suite-snapshot.jpg');
+        try {
+          await this.call('snapshot');
+          const info = await io.lstat(file);
+          if (!info.isFile() || info.size > 2 * 1024 * 1024 || info.size < 4) throw new RequestError(502, 'The Player Returned an Invalid Snapshot.');
+          return await io.readFile(file);
+        } finally { await io.rm(file, { force: true }); }
+      });
+      return send(response, 200, 'image/jpeg', bytes);
+    }
     if (request.method === 'GET') {
       if (path === '/api/v1/status') return json(response, 200, this.snapshot());
       if (path === '/api/v1/playback') return json(response, 200, this.playbackStatus());
@@ -350,7 +365,7 @@ class Suite {
         return this.lighting.slot(slot, id, revision);
       }));
     }
-    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|distribute)$/.exec(path);
+    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|distribute|display-power)$/.exec(path);
     if (command && request.method === 'POST') {
       const action = command[1];
       return json(response, 200, await this.update(request, async () => {
@@ -364,6 +379,10 @@ class Suite {
   }
 
   async command(action, body) {
+    if (action === 'display-power') {
+      if (!['on', 'standby'].includes(body.power)) throw new RequestError(400, 'Choose Power On or Standby.');
+      return this.call(action, { wake: body.power === 'on' });
+    }
     if (action === 'pause' || action === 'resume' || action === 'seek') {
       const current = this.playbackStatus();
       if (action === 'seek') {

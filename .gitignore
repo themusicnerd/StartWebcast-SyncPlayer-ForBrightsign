@@ -11,3 +11,4 @@ clock-key.pem
 clock-cert.pem
 credentials.json
 peer-credentials.json
+ota-signing-key.pem

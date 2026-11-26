@@ -43,6 +43,10 @@ p { line-height: 1.45; }
 .panel-heading { margin-bottom: 14px; }
 .status-pill { display: inline-block; font-size: .74rem; font-weight: 680; border: 1px solid #6a4c92; border-radius: 20px; padding: 4px 10px; color: #e9d6ff; background: #39264f; white-space: nowrap; }
 .status-pill[data-state="offline"], .status-pill[data-state="error"] { background: #42233e; color: #ffbbd8; border-color: #764266; }
+.player-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.player-tools button { min-height: 30px; padding: 5px 8px; font-size: .76rem; }
+.status-pill[data-state="on"] { background: #263632; border-color: #558576; color: #c7f2df; }
+.status-pill[data-state="off"] { background: #423333; border-color: #8d655f; color: #ffded7; }
 .source-name { margin: 9px 0 15px; font-size: clamp(1.2rem, 2vw, 1.8rem); overflow-wrap: anywhere; }
 .player-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 125px), 1fr)); gap: 8px; margin-bottom: 12px; }
 .player { border: 1px solid #503b6e; background: #281d3b; padding: 10px; border-radius: 8px; }
@@ -97,4 +101,8 @@ button.danger { color: #ffd0e0; border-color: #7b4564; background: #432539; }
 time { font-variant-numeric: tabular-nums; display: inline-block; margin: 7px 0; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 2; max-width: min(440px, calc(100% - 36px)); padding: 12px 16px; border: 1px solid #9c71db; border-radius: 8px; background: #3d285a; box-shadow: 0 8px 30px #10091cc0; }
 .toast[data-state="error"] { background: #522845; border-color: #bd6994; }
-@media (max-width: 540px) { .masthead { gap: 12px; } nav { order: 3; flex-basis: 100%; } .masthead .status-pill { margin-left: auto; } .section-heading { align-items: start; } }
+#snapshot-dialog { color: inherit; width: min(990px, calc(100% - 24px)); }
+#snapshot-dialog::backdrop { background: #10091cdb; }
+#snapshot-dialog form { width: auto; }
+#snapshot-image { width: 100%; height: auto; display: block; background: #120d1c; }
+@media (max-width: 540px) { .masthead { gap: 8px; } nav { order: 3; flex-basis: 100%; } .section-heading { align-items: start; } }

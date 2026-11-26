@@ -8,6 +8,7 @@ const { performance } = require('node:perf_hooks');
 const { promisify } = require('node:util');
 const { RequestError } = require('./library');
 const { Suite } = require('./suite');
+const { Updates, versionPattern } = require('./updates');
 
 const deriveKey = promisify(scrypt);
 const protocol = 'start-syncplayer-clock-v1';
@@ -21,7 +22,7 @@ function clockRequest(port, telemetry = () => {}) {
   let pending;
   port.addEventListener('bsmessage', (reply) => {
     if (reply?.protocol === 'start-syncplayer-playback-v1') {
-      telemetry(reply.status);
+      telemetry(reply.status, reply.version);
       return;
     }
     if (!pending || reply?.protocol !== protocol || reply.id !== pending.id) return;
@@ -69,7 +70,7 @@ function send(response, status, contentType, body, extra = {}) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Content-Security-Policy': "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; img-src 'self' blob:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     ...extra,
   });
   response.end(body);
@@ -90,7 +91,7 @@ async function readUpdate(request) {
   return toUtc(input);
 }
 
-function makeServer({ host, port, tls, credentials, requestClock, suite }) {
+function makeServer({ host, port, tls, credentials, requestClock, suite, updates }) {
   const authority = `${host}:${port}`;
   const origin = `https://${authority}`;
   const assets = new Map([
@@ -155,8 +156,9 @@ function makeServer({ host, port, tls, credentials, requestClock, suite }) {
         request.headers['x-syncplayer-request'] !== 'clock' || (request.headers.origin && request.headers.origin !== origin))) {
       return json(response, 403, { error: 'Use the StartWebcast SyncPlayer interface or its authenticated API.' });
     }
+    if (updates && /^\/api\/v1\/updates(?:\/|$)/.test(url.pathname)) return updates.operator(request, response, url.pathname, json);
     if (request.url !== '/api/v1/clock') {
-      if (suite && url.pathname.startsWith('/api/v1/')) return suite.operator(request, response, url, json);
+      if (suite && url.pathname.startsWith('/api/v1/')) return suite.operator(request, response, url, json, send);
       return json(response, 404, { error: 'Page not found.' });
     }
     if (!['GET', 'PUT'].includes(request.method)) {
@@ -205,25 +207,36 @@ if (require.main === module) {
     const MessagePort = require('@brightsign/messageport');
     const host = process.argv[2];
     const port = 8080;
+    const running = process.argv[3] || 'base';
+    if (running !== 'base' && !versionPattern.test(running)) throw new Error('Invalid Update Slot');
+    const card = running === 'base' ? join(__dirname, '..') : join(__dirname, '..', '..', '..', '..');
+    const privateFile = (name) => readFileSync(join(card, 'clock', name));
+    const version = readFileSync(join(__dirname, '..', 'VERSION'), 'ascii').trim();
     const tls = {
-      cert: readFileSync(join(__dirname, 'clock-cert.pem')),
-      key: readFileSync(join(__dirname, 'clock-key.pem')),
+      cert: privateFile('clock-cert.pem'),
+      key: privateFile('clock-key.pem'),
     };
-    const credentials = JSON.parse(readFileSync(join(__dirname, 'credentials.json'), 'utf8'));
-    const config = JSON.parse(readFileSync(join(__dirname, '..', 'syncplayer.json'), 'utf8'));
+    const credentials = JSON.parse(privateFile('credentials.json'));
+    const config = JSON.parse(readFileSync(join(card, 'syncplayer.json'), 'utf8'));
     let exchange = {};
-    try { exchange = JSON.parse(readFileSync(join(__dirname, 'peer-credentials.json'), 'utf8')); }
+    try { exchange = JSON.parse(privateFile('peer-credentials.json')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    let suite;
-    const requestClock = clockRequest(new MessagePort(), (status) => suite?.receivePlayback(status));
-    suite = new Suite({ host, config, root: join(__dirname, '..', 'library'), native: requestClock, exchange });
-    const server = makeServer({ host, port, tls, credentials, requestClock, suite });
+    let server, suite, healthy;
+    const requestClock = clockRequest(new MessagePort(), (status, nativeVersion) => {
+      suite?.receivePlayback(status);
+      if (running !== 'base' && !healthy && server?.listening && nativeVersion === version) {
+        healthy = updates.health().catch(() => { healthy = undefined; });
+      }
+    });
+    suite = new Suite({ host, config, root: join(card, 'library'), native: requestClock, exchange });
+    const updates = new Updates({ root: card, running, version, restart: () => suite.call('ota-restart') });
+    server = makeServer({ host, port, tls, credentials, requestClock, suite, updates });
     server.on('error', () => console.error('StartWebcast SyncPlayer server could not start.'));
-    suite.init().then(() => {
+    Promise.all([suite.init(), updates.init()]).then(() => {
       server.listen(port, host, () => console.log(`StartWebcast SyncPlayer listening on ${host}:${port}`));
       void suite.refresh();
       setInterval(() => void suite.refresh(), 5000).unref();
-    });
+    }).catch(() => console.error('StartWebcast SyncPlayer could not open SD storage.'));
   } catch {
     console.error('Start SyncPlayer clock server setup failed.');
   }

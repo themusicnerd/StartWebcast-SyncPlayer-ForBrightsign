@@ -1,5 +1,13 @@
 # StartWebcast SyncPlayer operator guide
 
+**Group Membership** on the leader lists the current roster. **Add Player** re-admits a provisioned follower. A new physical player needs its card identity and peer credentials before it appears in the selector.
+
+**Clock & Schedule** saves the Sydney wake and standby times. Clear **Enable Display Schedule** and save to let the leader or standalone player run outside those hours. Followers follow the leader’s display schedule in group mode.
+
+The top bar shows HDMI-reported TV power. **Power On** and **Standby** send local HDMI-CEC commands to the connected display. **Snapshot** captures a 960 × 540 JPEG of the player’s video and graphics output. A snapshot can show content while a television is off, and HDMI adapters or displays can report power differently. [BrightSign HDMI and Screenshot API](https://docs.brightsign.biz/develop/rovideomode) · [BrightSign HDMI-CEC API](https://docs.brightsign.biz/develop/rocecinterface)
+
+**Updates** accepts signed packages from the operator’s computer or a configurable GitHub branch. [App Update Guide](UPDATES.md)
+
 Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.168.1.11`, `192.168.1.12` and `192.168.1.13`. Sign in with the installation credentials. The BrightSign diagnostics server uses its own HTTPS address on port 443. The bundled interface and local library work without internet access.
 
 ## Playback and media

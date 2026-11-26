@@ -265,4 +265,4 @@ class Library {
 }
 
 module.exports = { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern,
-  hashFile, initStorage, maxAssetBytes, promote, receive, reserveBytes, safeName };
+  hashFile, initStorage, maxAssetBytes, privateDirectory, promote, receive, reserveBytes, safeName };

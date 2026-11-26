@@ -31,7 +31,7 @@ def provision_peers(cards):
         path.write_text(json.dumps(exchange[player]), encoding="ascii")
 
 
-def stage(root, output, openssl):
+def stage(root, output, openssl, update_key=None):
     players = sorted(path for path in root.iterdir() if path.is_dir() and (path / "syncplayer.json").is_file())
     if not players:
         raise ValueError("No prepared player directories were found")
@@ -40,6 +40,9 @@ def stage(root, output, openssl):
     if (ROOT / "docs/SUITE.md").is_file():
         package["SUITE.md"] = ROOT / "docs/SUITE.md"
         package["API_VERIFICATION.md"] = ROOT / "docs/API_VERIFICATION.md"
+        package["UPDATES.md"] = ROOT / "docs/UPDATES.md"
+    if update_key is not None and not update_key.read_bytes().startswith(b"-----BEGIN PUBLIC KEY-----"):
+        raise ValueError("Use the public update verification key")
     for card in players:
         config_bytes = (card / "syncplayer.json").read_bytes()
         config = json.loads(config_bytes)
@@ -51,6 +54,10 @@ def stage(root, output, openssl):
         if set(media) != {"media/HOLDING.jpeg", f"media/Presentation_{player}.mp4"} or any(sha256(card / name) != digest for name, digest in media.items()):
             raise ValueError(f"Media verification failed for {card.name}")
         write_card_boot_files(card, config, player, media)
+        if update_key is not None:
+            destination = card / "clock/update-trust.pem"
+            shutil.copyfile(update_key, destination)
+            package[f"{card.name}/clock/update-trust.pem"] = destination
         if (card / "syncplayer.json").read_bytes() != config_bytes:
             raise ValueError(f"Check the regenerated configuration for {card.name}")
         if openssl and not (card / "clock/credentials.json").exists():
@@ -78,11 +85,12 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "releases")
     parser.add_argument("--provision", action="store_true", help="Provision private peer files and missing web logins")
     parser.add_argument("--openssl", default=shutil.which("openssl"))
+    parser.add_argument("--update-key", type=Path, help="Public Ed25519 verification key for these cards")
     args = parser.parse_args()
     if args.provision and not args.openssl:
         parser.error("OpenSSL is required for private provisioning")
     try:
-        print(stage(args.cards.resolve(), args.output.resolve(), args.openssl if args.provision else None))
+        print(stage(args.cards.resolve(), args.output.resolve(), args.openssl if args.provision else None, args.update_key))
     except (OSError, ValueError, KeyError) as error:
         parser.exit(1, f"SD update failed. {error}\n")
 

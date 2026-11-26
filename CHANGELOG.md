@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.5
+
+- Stage signed application updates from a local file or a configurable GitHub repository and branch. Install on restart with a previous-version fallback and rollback.
+- Show HDMI-reported TV power, local HDMI-CEC Power On and Standby controls, and snapshots in the player header.
+- Add a dedicated Add Player selector for provisioned followers and a switch for the saved display schedule. Use Title Case for console controls and link the logo to StartWebcast.
+
 ## 0.2.4 · 26 November 2026
 
 - Keep navigation in view and highlight the current section. Balance the dashboard in equal two-, three- and four-column sections.

@@ -193,7 +193,7 @@ def write_card_boot_files(directory, config, player, media_manifest):
     shutil.copyfile(ROOT / "VERSION", directory / "VERSION")
     app_files = ["autorun.brs", "playback.brs", "syncplayer.json", "VERSION"]
     (directory / "clock").mkdir(exist_ok=True)
-    for name in ("server.js", "index.html", "clock.js", "clock.css", "startwebcast.png", "library.js", "mp4.js", "suite.js", "peers.js", "layer.html", "layer.js", "dmx.js"):
+    for name in ("server.js", "index.html", "clock.js", "clock.css", "startwebcast.png", "library.js", "mp4.js", "suite.js", "peers.js", "layer.html", "layer.js", "dmx.js", "updates.js"):
         target = f"clock/{name}"
         shutil.copyfile(ROOT / "src" / target, directory / target)
         app_files.append(target)

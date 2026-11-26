@@ -84,7 +84,8 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(set(files), expected)
             self.assertIsNone(archive.testzip())
             self.assertEqual(archive.read("autorun.brs"), (ROOT / "src/autorun.brs").read_bytes())
-            self.assertIn(f'fields.version = "{version}"'.encode(), archive.read("autorun.brs"))
+            self.assertEqual(archive.read("VERSION").decode("ascii").strip(), version)
+            self.assertIn(b'fields.version = m.version', archive.read("autorun.brs"))
             self.assertEqual(json.loads(archive.read("syncplayer.json")), load_config(ROOT / "config/syncplayer.json"))
             manifest = dict(
                 reversed(line.split("  ", 1))
