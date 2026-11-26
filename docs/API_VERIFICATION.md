@@ -117,3 +117,7 @@ Player C decoded a generated SRT feed, accepted Stop and retained the SRT startu
 ### 0.2.21 HDMI Genlock
 
 The desktop native mock covers Off, accepted and rejected `roVideoMode.SetSyncDomain(domain As String) As Boolean` requests and the standalone guard. All three XD236 units on BrightSignOS 9.1.173 reported Off after upgrading. The lock state has not been measured on hardware. [BrightSign video mode API](https://docs.brightsign.biz/develop/rovideomode#set-sync-domain)
+
+### 0.2.23 Display Control and Preview Rotation
+
+Samsung's [Consumer IP Control Worksheet](https://image-us.samsung.com/SamsungUS/samsungbusiness/tv-ci-resources/Samsung-IP-Control.pdf) confirms IP Remote and Power On with Mobile. The Samsung Frame LS03HE product specification lists IP Control. The desktop HTTPS fixture verified the JSON-RPC pairing and power exchange and rejection of a changed TV certificate before sending the token. TCP and UDP loopback tests checked exact bytes, schedule tests checked routing, and layout tests checked preview rotation persistence and follower forwarding. Samsung IP power commands still require a test on the LS03HE television. [Samsung LS03HE specifications](https://www.samsung.com/au/lifestyle-tvs/the-frame/ls03he-55-inch-the-frame-pro-4k-vision-ai-smart-tv-qa55ls03hewxxy/#specs)

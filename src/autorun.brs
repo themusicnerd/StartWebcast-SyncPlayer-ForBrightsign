@@ -1550,7 +1550,7 @@ Sub ApplyScheduledPower(panel As Object, wake As Dynamic)
     End If
     panel.before = wake
     panel.screens = wake
-    If panel.cec <> invalid Then SendDisplayCec(panel.cec, wake)
+    If panel.cec <> invalid And m.clockWeb = invalid Then SendDisplayCec(panel.cec, wake)
 End Sub
 
 Sub SendDisplayCec(cec As Object, wake As Boolean)

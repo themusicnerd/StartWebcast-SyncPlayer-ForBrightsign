@@ -3,15 +3,20 @@
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
 const io = require('node:fs/promises');
-const { isIP } = require('node:net');
+const net = require('node:net');
+const { isIP } = net;
+const dgram = require('node:dgram');
+const https = require('node:https');
+const tls = require('node:tls');
 const { performance } = require('node:perf_hooks');
 const { join } = require('node:path');
 const { pipeline } = require('node:stream/promises');
-const { Library, RequestError, assetPath, availableBytes, digestPattern, idPattern } = require('./library');
+const { Library, RequestError, assetPath, atomicJson, availableBytes, digestPattern, idPattern, privateDirectory } = require('./library');
 const { Follower, watchPtp } = require('./peers');
 const { Lighting } = require('./dmx');
 const { inspectMp4 } = require('./mp4');
 
+const previewRotations = [0, 90, 180, 270];
 const outputModes = ['3840x2160x50p', '1920x1080x50p'];
 const onlineMs = 16000;
 const maxGroupJumpMs = 99999999;
@@ -215,6 +220,234 @@ async function readJson(request, max = 8192) {
   return data;
 }
 
+const modes = ['cec', 'samsung', 'hybrid', 'tcp', 'udp'];
+const custom = ['tcp', 'udp'];
+const defaultDisplayControl = { mode: 'cec' };
+const bad = (message) => new RequestError(400, message);
+
+function lanAddress(value) {
+  if (net.isIP(value) !== 4) return false;
+  const [a, b, , d] = value.split('.').map(Number);
+  return d > 0 && d < 255 && (a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168));
+}
+
+function commandBytes(value, format) {
+  if (typeof value !== 'string' || value.length > 8192) throw bad('Enter a Display Command of Up to 1400 Bytes.');
+  let bytes;
+  if (format === 'hex') {
+    const hex = value.replace(/\s+/g, '');
+    if (!/^(?:[0-9a-f]{2})+$/i.test(hex)) throw bad('Enter Complete Hex Bytes.');
+    bytes = Buffer.from(hex, 'hex');
+  } else if (format === 'text') {
+    bytes = Buffer.from(value, 'utf8');
+  } else throw bad('Choose Text or Hex.');
+  if (bytes.length < 1 || bytes.length > 1400) throw bad('Enter a Display Command of 1 to 1400 Bytes.');
+  return bytes;
+}
+
+function profile(body, current = defaultDisplayControl) {
+  if (!modes.includes(body?.mode)) throw bad('Choose a Display Control Method.');
+  const { mode } = body;
+  if (mode === 'cec') return { ...current, mode };
+  const { address, port } = body;
+  if (!lanAddress(address)) throw bad('Enter the Display’s Private IPv4 Address.');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad('Enter a Port from 1 to 65535.');
+  if (!custom.includes(mode)) {
+    if (![1515, 1516].includes(port)) throw bad('Use Samsung IP Control Port 1516 or 1515.');
+    const { token, fingerprint } = current;
+    return { mode, address, port, ...(address === current.address && port === current.port && token && fingerprint ? { token, fingerprint } : {}) };
+  }
+  const { format, on, standby } = body;
+  commandBytes(on, format);
+  commandBytes(standby, format);
+  return { mode, address, port, format, on, standby };
+}
+
+function transmit(settings, bytes) {
+  return new Promise((resolve, reject) => {
+    const failed = () => reject(new RequestError(502, 'Could Not Send the Display Command. Check Its Address and Port.'));
+    if (settings.mode === 'udp') {
+      const socket = dgram.createSocket('udp4');
+      let finished = false;
+      const complete = (error) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        socket.close();
+        if (error) failed(); else resolve();
+      };
+      const timer = setTimeout(() => complete(new Error('Datagram timed out')), 4000);
+      socket.on('error', complete);
+      socket.send(bytes, settings.port, settings.address, complete);
+      return;
+    }
+    const socket = net.createConnection(settings.port, settings.address);
+    const timer = setTimeout(() => { socket.destroy(); failed(); }, 4000);
+    socket.once('close', () => { clearTimeout(timer); failed(); });
+    socket.once('error', failed);
+    socket.once('connect', () => socket.end(bytes, () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve();
+    }));
+  });
+}
+
+function samsungRpc(settings, method, params) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
+    let fingerprint;
+    let connection;
+    let reason = 'Samsung IP Control Did Not Respond. Check the TV’s Address and IP Remote Setting.';
+    const request = https.request({
+      method: 'POST', hostname: settings.address, port: settings.port, path: '/',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      createConnection(options, callback) {
+        connection = tls.connect({ host: settings.address, port: settings.port, rejectUnauthorized: false });
+        connection.once('error', callback);
+        connection.once('secureConnect', () => {
+          fingerprint = connection.getPeerCertificate().fingerprint256;
+          if (!fingerprint || (settings.fingerprint && settings.fingerprint !== fingerprint)) {
+            reason = 'The Samsung TV Certificate Changed. Pair With the TV Again.';
+            connection.destroy(new Error('Display certificate rejected'));
+            return;
+          }
+          connection.removeListener('error', callback);
+          callback(null, connection);
+        });
+      },
+    }, (response) => {
+      const chunks = [];
+      let size = 0;
+      response.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > 16384) request.destroy(new Error('Display response too large'));
+        else chunks.push(chunk);
+      });
+      response.on('error', () => reject(new RequestError(502, reason)));
+      response.on('end', () => {
+        try {
+          const reply = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (reply.error?.code === -32010) throw new RequestError(409, 'The Samsung TV Rejected Its Access Token. Pair Again.');
+          if (response.statusCode !== 200 || reply.id !== 1 || reply.error || !Object.hasOwn(reply, 'result')) {
+            throw new RequestError(502, 'The Samsung TV Rejected the IP Control Command.');
+          }
+          resolve({ result: reply.result, fingerprint });
+        } catch (error) {
+          reject(error instanceof RequestError ? error : new RequestError(502, 'Invalid Samsung IP Control Reply.'));
+        }
+      });
+    });
+    const timer = setTimeout(() => {
+      connection?.destroy();
+      request.destroy(new Error('Display command timed out'));
+    }, method === 'createAccessToken' ? 30000 : 6000);
+    request.on('close', () => clearTimeout(timer));
+    request.on('error', () => reject(new RequestError(502, reason)));
+    request.end(body);
+  });
+}
+
+class DisplayControl {
+  constructor(root, cec, reserved = [], rpc = samsungRpc) {
+    this.folder = join(root, 'library');
+    this.path = join(this.folder, 'display-control.json');
+    this.cec = cec;
+    this.reserved = new Set(reserved);
+    this.rpc = rpc;
+    this.settings = defaultDisplayControl;
+    this.result = '';
+    this.pending = false;
+  }
+
+  async init() {
+    try {
+      const saved = JSON.parse(await io.readFile(this.path, 'utf8'));
+      this.settings = profile(saved, saved);
+      if (this.settings.mode !== 'cec' && this.reserved.has(this.settings.address)) this.settings = defaultDisplayControl;
+    } catch (error) {
+      if (error.code !== 'ENOENT') this.result = 'Display Control Settings Could Not Be Opened.';
+    }
+  }
+
+  snapshot() {
+    const { token, fingerprint, ...settings } = this.settings;
+    return { ...settings, paired: Boolean(token && fingerprint), result: this.result };
+  }
+
+  async persist(settings) {
+    await privateDirectory(this.folder);
+    await atomicJson(this.path, settings);
+    this.settings = settings;
+  }
+
+  async configure(body) {
+    if (this.pending) throw new RequestError(409, 'A Display Command Is in Progress.');
+    const next = profile(body, this.settings);
+    if (next.mode !== 'cec' && this.reserved.has(next.address)) throw bad('Enter the Display Address, Not a SyncPlayer Address.');
+    await this.persist(next);
+    this.result = 'Display Control Settings Saved.';
+    return this.snapshot();
+  }
+
+  async run(execute) {
+    if (this.pending) throw new RequestError(409, 'A Display Command Is in Progress.');
+    this.pending = true;
+    try {
+      await execute();
+      return this.snapshot();
+    } catch (error) {
+      this.result = error instanceof RequestError ? error.message : 'Display Command Failed.';
+      throw error;
+    } finally {
+      this.pending = false;
+    }
+  }
+
+  async pair() {
+    const settings = this.settings;
+    if (!['samsung', 'hybrid'].includes(settings.mode)) throw bad('Save Samsung IP Control Settings First.');
+    return this.run(async () => {
+      const { result, fingerprint } = await this.rpc({ ...settings, fingerprint: undefined }, 'createAccessToken');
+      const token = result?.AccessToken;
+      if (typeof token !== 'string' || !token || token.length > 1024 || !fingerprint) {
+        throw new RequestError(502, 'Pairing Was Not Approved on the Samsung TV.');
+      }
+      await this.persist({ ...settings, token, fingerprint });
+      this.result = 'Samsung TV Paired.';
+    });
+  }
+
+  async power(power, override) {
+    if (!['on', 'standby'].includes(power) || (override !== undefined && override !== 'cec')) throw bad('Choose Power On or Standby.');
+    const settings = this.settings;
+    const useCec = override === 'cec' || settings.mode === 'cec' || (settings.mode === 'hybrid' && power === 'on');
+    return this.run(async () => {
+      if (useCec) {
+        await this.cec(power === 'on');
+        this.result = 'HDMI-CEC Request Sent.';
+      } else if (custom.includes(settings.mode)) {
+        await transmit(settings, commandBytes(settings[power], settings.format));
+        this.result = 'Custom Display Command Sent.';
+      } else {
+        if (!settings.token || !settings.fingerprint) throw new RequestError(409, 'Pair With the Samsung TV First.');
+        await this.rpc(settings, 'powerControl', { AccessToken: settings.token, power: power === 'on' ? 'powerOn' : 'powerOff' });
+        this.result = 'Samsung TV Accepted the Power Request.';
+      }
+    });
+  }
+
+  command(body) {
+    const settings = this.settings;
+    if (!custom.includes(settings.mode)) throw bad('Save a Custom TCP or UDP Destination First.');
+    const bytes = commandBytes(body?.payload, body?.format);
+    return this.run(async () => {
+      await transmit(settings, bytes);
+      this.result = 'Custom Display Command Sent.';
+    });
+  }
+}
+
 class Suite {
   constructor({ config, host, root, native, exchange = {}, watch = watchPtp }) {
     this.config = config;
@@ -236,6 +469,8 @@ class Suite {
     this.metrics = {};
     this.cardMedia = null;
     this.exchange = exchange;
+    this.display = new DisplayControl(root, (wake) => this.call('display-power', { wake }), [host, ...Object.values(this.addresses)]);
+    this.scheduledDisplay = undefined;
     this.library = new Library(root, this.members, async (asset) => (await this.call('probe', { asset })).ok === 'yes');
     this.follower = new Follower(root, host, this.addresses, exchange, (action, body) => this.call(action, body), () => this.captureJpeg('thumbnail'));
     this.lighting = new Lighting(host, root, {
@@ -257,6 +492,7 @@ class Suite {
     try { await this.library.init(); } catch { this.problem = 'The media index or storage could not be opened.'; }
     this.applyRoster();
     await this.lighting.init();
+    await this.display.init();
     void this.inspectCardPresentation();
   }
 
@@ -420,7 +656,32 @@ class Suite {
       try { return await this.follower.request(this.status, 'layout', layout); }
       catch { throw new RequestError(409, 'The Leader Could Not Save the Layout.'); }
     }
-    await this.library.transaction((next) => { next.playerLayout = layout; });
+    await this.library.transaction((next) => {
+      if (next.playerLayout?.rotations) layout.rotations = next.playerLayout.rotations;
+      next.playerLayout = layout;
+    });
+    return layout;
+  }
+
+  async savePreviewRotation(input) {
+    const { player, rotation } = input || {};
+    if (!this.members.includes(player) || !previewRotations.includes(rotation)) {
+      throw new RequestError(400, 'Select a Player and a Rotation of 0°, 90°, 180°, or 270°.');
+    }
+    if (this.status?.role === 'follower') {
+      try {
+        const layout = await this.follower.request(this.status, 'preview-rotation', { player, rotation });
+        const report = this.follower.groupReport();
+        if (report) report.layout = layout;
+        return layout;
+      } catch { throw new RequestError(409, 'The Leader Could Not Save the Preview Rotation.'); }
+    }
+    let layout;
+    await this.library.transaction((next) => {
+      const current = next.playerLayout || this.layout();
+      layout = { ...current, rotations: { ...current.rotations, [player]: rotation } };
+      next.playerLayout = layout;
+    });
     return layout;
   }
 
@@ -536,6 +797,7 @@ class Suite {
 
   async refresh() {
     try { await this.call('status'); } catch { /* Commands remain available while startup completes. */ }
+    void this.refreshDisplaySchedule();
     try { this.storage = await availableBytes(this.library.root); } catch { this.storage = null; }
     if (this.status?.role === 'follower') void this.follower.pulse(this.status, this.cardMedia);
     if (this.status?.role === 'leader' && this.status.waiting) {
@@ -544,6 +806,18 @@ class Suite {
         try { await this.call('arm', { revision: this.status.revision }); } catch { /* Retry on the next status interval. */ }
       }
     }
+  }
+
+  async refreshDisplaySchedule() {
+    const wake = this.status?.scheduledwake;
+    if (typeof wake !== 'boolean') {
+      this.scheduledDisplay = undefined;
+      return;
+    }
+    if (this.scheduledDisplay === wake || this.display.pending || this.mutation) return;
+    this.scheduledDisplay = wake;
+    try { await this.display.power(wake ? 'on' : 'standby'); }
+    catch { this.note('Display Schedule Request Failed. See Display Control.'); }
   }
 
   unready(revision) {
@@ -581,7 +855,7 @@ class Suite {
     });
     const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
       decoderTiming(reports, localPlayback);
-    return { native, players, layout: this.layout(), presentation: this.cardPresentation(), recovery: this.streamRecovery(), storage: this.storage, problem: this.problem, ptp,
+    return { native, players, displayControl: this.display.snapshot(), layout: this.layout(), presentation: this.cardPresentation(), recovery: this.streamRecovery(), storage: this.storage, problem: this.problem, ptp,
       dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot(), metrics: this.metrics };
   }
 
@@ -618,6 +892,18 @@ class Suite {
 
   async operator(request, response, url, json, send) {
     const path = url.pathname;
+    if (path === '/api/v1/display-control') {
+      if (request.method === 'GET') return json(response, 200, this.display.snapshot());
+      if (request.method === 'PUT') return json(response, 200,
+        await this.update(request, async () => this.display.configure(await readJson(request, 24576))));
+    }
+    if (path === '/api/v1/display-control/pair' && request.method === 'POST') {
+      await readJson(request);
+      return json(response, 200, await this.update(request, () => this.display.pair()));
+    }
+    if (path === '/api/v1/display-command' && request.method === 'POST') {
+      return json(response, 200, await this.update(request, async () => this.display.command(await readJson(request, 12288))));
+    }
     if (path === '/api/v1/network' && request.method === 'GET') return json(response, 200, {
       config: this.status?.network, result: this.status?.networkresult || '', groupAddress: this.addresses[this.id], role: this.status?.role,
     });
@@ -640,6 +926,8 @@ class Suite {
         this.note('Ethernet Change Scheduled');
         return { ok: true, address: profile.address || (this.status.role !== 'standalone' ? this.addresses[this.id] : null) };
       }));
+    if (path === '/api/v1/preview-rotation' && request.method === 'PUT') return json(response, 200,
+      await this.update(request, async () => this.savePreviewRotation(await readJson(request))));
     if (path === '/api/v1/player-layout' && request.method === 'PUT') return json(response, 200,
       await this.update(request, async () => this.saveLayout(await readJson(request))));
     if (path === '/api/v1/preview' && request.method === 'POST') {
@@ -789,8 +1077,7 @@ class Suite {
       return this.call(action, { mode, seconds });
     }
     if (action === 'display-power') {
-      if (!['on', 'standby'].includes(body.power)) throw new RequestError(400, 'Choose Power On or Standby.');
-      return this.call(action, { wake: body.power === 'on' });
+      return this.display.power(body.power, body.via);
     }
     if (action === 'pause' || action === 'resume' || action === 'seek') {
       const current = this.playbackStatus();
@@ -901,7 +1188,7 @@ class Suite {
   }
 
   async peer(request, response, url, json, send) {
-    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|presentation|seek|transport|layout|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
+    const match = /^\/peer\/v1\/players\/([A-Z])\/(heartbeat|presentation|seek|transport|layout|preview-rotation|preview|capture|preview\/([A-Z])|asset\/([a-f0-9]{24}))$/.exec(url.pathname);
     if (!match || this.status?.role !== 'leader') throw new RequestError(404, 'Peer action unavailable.');
     const player = match[1];
     const token = /^Bearer ([a-f0-9]{64})$/.exec(request.headers.authorization || '');
@@ -935,8 +1222,10 @@ class Suite {
         group,
         assignment: admitted ? this.library.assignment(player) : null });
     }
-    if (['layout', 'preview', 'capture'].includes(match[2]) || match[3]) {
+    if (['layout', 'preview-rotation', 'preview', 'capture'].includes(match[2]) || match[3]) {
       if (!this.activeMembers().includes(player)) throw new RequestError(409, 'Player Is Outside the Active Group.');
+      if (match[2] === 'preview-rotation' && request.method === 'POST') return json(response, 200,
+        await this.update(request, async () => this.savePreviewRotation(await readJson(request))));
       if (match[2] === 'layout' && request.method === 'POST') return json(response, 200,
         await this.update(request, async () => this.saveLayout(await readJson(request))));
       if (match[2] === 'preview' && request.method === 'POST') {
@@ -1010,4 +1299,4 @@ class Suite {
   }
 }
 
-module.exports = { Suite, colourValues, cpuSample, decoderTiming, networkProfile, networkTimeServer, playerLayout, readJson, rectangle, sanitiseSettings, sourceUrl };
+module.exports = { Suite, DisplayControl, commandBytes, samsungRpc, colourValues, cpuSample, decoderTiming, networkProfile, networkTimeServer, playerLayout, readJson, rectangle, sanitiseSettings, sourceUrl };

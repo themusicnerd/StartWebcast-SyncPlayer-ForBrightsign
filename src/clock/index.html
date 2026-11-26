@@ -126,6 +126,27 @@
         <article class="panel"><h3>Clock &amp; Schedule</h3><p><time id="current">Reading Sydney time…</time></p><div class="actions"><button type="button" class="secondary" id="computer">Use This Computer’s Time</button></div><form id="manual" class="stack"><div class="form-row"><label class="grow">Sydney Date and Time<input id="sydney" type="datetime-local" required></label><button id="save" type="submit" class="secondary">Set Time</button></div></form><form id="schedule-form" class="stack"><label class="check"><input type="checkbox" name="enabled" checked> Enable Display Schedule</label><div class="form-row"><label>Daily Wake<input name="on" type="time" required></label><label>Daily Standby<input name="off" type="time" required></label><button type="submit" class="secondary">Save Schedule</button></div><p class="muted" id="schedule-help"></p></form></article>
         <article class="panel"><form id="ntp-form" class="stack"><h3>Network Time</h3><label>NTP Server<input type="text" name="ntp" spellcheck="false" placeholder="0.au.pool.ntp.org"></label><label>Update Interval (Seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
         <article class="panel"><form id="startup-form" class="stack"><h3>Startup</h3><label class="check"><input type="checkbox" name="identonboot" checked aria-describedby="startup-ident-help"> Show IDENT on Boot</label><p id="startup-ident-help" class="muted">Clear this option for a black screen until playback starts.</p><button type="submit">Save Startup</button></form></article>
+        <article class="panel">
+          <form id="display-control-form" class="stack">
+            <h3>Display Control</h3>
+            <label>Power Control Method<select name="mode"><option value="cec">HDMI-CEC</option><option value="samsung">Samsung IP Control</option><option value="hybrid">CEC Wake / Samsung IP Standby</option><option value="tcp">Custom TCP</option><option value="udp">Custom UDP</option></select></label>
+            <fieldset class="stack" id="display-address" hidden><legend>Display Destination</legend>
+              <div class="form-row"><label class="grow">Display IP Address<input name="address" inputmode="decimal" placeholder="192.168.1.50"></label><label>Port<input name="port" type="number" min="1" max="65535" placeholder="1516"></label></div>
+            </fieldset>
+            <fieldset class="stack" id="display-saved-commands" hidden><legend>Power Commands</legend>
+              <label>Payload Format<select name="format"><option value="hex">Hex</option><option value="text">UTF-8 Text</option></select></label>
+              <label>Power On Payload<textarea name="on" rows="2" maxlength="8192" spellcheck="false"></textarea></label>
+              <label>Standby Payload<textarea name="standby" rows="2" maxlength="8192" spellcheck="false"></textarea></label>
+            </fieldset>
+            <div class="actions"><button type="submit">Save Display Control</button><button id="display-pair" type="button" class="secondary" hidden>Pair Samsung TV</button></div>
+            <p id="display-control-status" class="muted" role="status"></p>
+          </form>
+          <form id="display-command-form" class="stack" hidden>
+            <label>Send One-Off Command<select name="format"><option value="hex">Hex</option><option value="text">UTF-8 Text</option></select></label>
+            <label>Command Payload<textarea name="payload" rows="2" maxlength="8192" spellcheck="false" required></textarea></label>
+            <button type="submit" class="secondary">Send Command</button>
+          </form>
+        </article>
       </div>
     </section>
 
@@ -260,6 +281,11 @@
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"identonboot":false}</code> for a black screen until playback starts at the next boot.</dd>
+              <dt>GET or PUT <code>/display-control</code></dt><dd>Read or save the power method. Use <code>cec</code>, <code>samsung</code>, <code>hybrid</code>, <code>tcp</code> or <code>udp</code>.</dd>
+              <dt>POST <code>/display-control/pair</code></dt><dd>Send <code>{}</code> and approve the pairing prompt on the Samsung TV.</dd>
+              <dt>POST <code>/display-power</code></dt><dd>Send <code>{"power":"standby"}</code> or <code>{"power":"on"}</code>. Add <code>"via":"cec"</code> to use HDMI-CEC for this request.</dd>
+              <dt>PUT <code>/preview-rotation</code></dt><dd>Send <code>{"player":"B","rotation":90}</code> to save the preview angle across the group.</dd>
+              <dt>POST <code>/display-command</code></dt><dd>With Custom TCP or UDP saved, send <code>{"format":"hex","payload":"00 FF"}</code> to the saved destination.</dd>
               <dt>POST <code>/ident</code></dt><dd>Send <code>{}</code> to show IDENT for 10 seconds, or send <code>{"mode":"test-pattern"}</code> to show local colour bars. Send <code>{"seconds":0}</code> to close either screen.</dd>
               <dt>GET <code>/network</code></dt><dd>Read the Ethernet mode, address, mask, gateway and DNS settings.</dd>
               <dt>GET <code>/sources</code></dt><dd>List saved SRT feeds, RTSP feeds and webpages. Send a saved ID to <code>POST /source</code> to start it.</dd>

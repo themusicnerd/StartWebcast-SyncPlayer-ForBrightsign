@@ -278,7 +278,13 @@ function renderStatus() {
     if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = 'Use HDMI Audio and Volume to Control Native Video and SRT Audio on This Player.';
-    $('#cec-on').disabled = $('#cec-standby').disabled = !native.cecavailable;
+    const display = dashboard.displayControl || { mode: 'cec' };
+    $('#cec-on').disabled = ['cec', 'hybrid'].includes(display.mode) && !native.cecavailable ||
+      display.mode === 'samsung' && !display.paired;
+    $('#cec-standby').disabled = display.mode === 'cec' && !native.cecavailable ||
+      ['samsung', 'hybrid'].includes(display.mode) && !display.paired;
+    fill('#display-control-form', { address: '', port: '', format: 'hex', on: '', standby: '', ...display });
+    renderDisplayControl(display);
     $('#snapshot').disabled = native.state === 'booting';
     const power = { on: 'TV On', off: 'TV Off', unknown: 'TV Unknown' };
     $('#tv-power').textContent = power[native.tvpower] || power.unknown;
@@ -354,6 +360,7 @@ function renderStatus() {
   const layout = dashboard.layout || { rows: 1, columns: Math.min(3, Math.max(1, players.length)), cells: players.slice(0, 3).map(({ id }) => id) };
   $('#edit-player-layout').disabled = !dashboard.layout;
   showLayerPreview(local, native);
+  $('#layer-preview-frame').dataset.rotation = layout.rotations?.[native?.playerid] || 0;
   const roster = new Map(players.map((player) => [player.id, player]));
   const list = layout.cells.map((id) => {
     const player = roster.get(id);
@@ -367,11 +374,26 @@ function renderStatus() {
     const link = item('a', player.ip);
     link.href = `https://${player.ip}:8080/`;
     const frame = item('div', undefined, 'preview-frame');
+    const rotation = layout.rotations?.[id] || 0;
+    frame.dataset.rotation = rotation;
+    const rotate = Object.assign(item('button', '↻', 'secondary preview-rotate'), { type: 'button', disabled: !dashboard.layout });
+    rotate.setAttribute('aria-label', `Rotate Player ${id} Preview 90 Degrees Clockwise. Current Rotation ${rotation} Degrees.`);
+    rotate.title = `Rotate Player ${id} Preview (${rotation}°)`;
+    rotate.addEventListener('click', async () => {
+      const result = await operate(() => api('preview-rotation', 'PUT', { player: id, rotation: (rotation + 90) % 360 }));
+      if (result) {
+        dashboard.layout = result;
+        renderStatus();
+        document.getElementById(`rotate-preview-${id}`)?.focus({ preventScroll: true });
+      }
+    });
+    rotate.id = `rotate-preview-${id}`;
     const path = previewUrl(player);
     if (path) {
       const image = Object.assign(item('img'), { src: path, alt: `Player ${player.id} Display Capture`, width: 160, height: 90, loading: 'lazy' });
       frame.append(image);
     } else frame.append(item('span', 'No Preview'));
+    frame.append(rotate);
     card.append(top, link, item('p', info ? `${labels[info.role]} · ${info.output}` : player.lastSeen ? `Last seen ${dateFormat.format(new Date(player.lastSeen))}` : 'Waiting for this player'));
     top.after(frame);
     const offset = timing?.offsets?.[player.id];
@@ -758,6 +780,49 @@ form('#av-form', (fields, element) => {
   const restart = fields.output.value !== dashboard?.native?.output || rotation !== (dashboard?.native?.rotation ?? 0);
   saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked, audioenabled: fields.audioenabled.checked, cecremote: fields.cecremote.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
 });
+function renderDisplayControl(display = dashboard?.displayControl) {
+  const form = $('#display-control-form');
+  const { mode, address, port } = form.elements;
+  const samsung = ['samsung', 'hybrid'].includes(mode.value);
+  const custom = ['tcp', 'udp'].includes(mode.value);
+  $('#display-address').hidden = !samsung && !custom;
+  $('#display-saved-commands').hidden = !custom;
+  address.required = port.required = samsung || custom;
+  form.elements.on.required = form.elements.standby.required = custom;
+  $('#display-command-form').hidden = !['tcp', 'udp'].includes(display?.mode);
+  const pair = $('#display-pair');
+  pair.hidden = !samsung;
+  pair.disabled = mode.value !== display?.mode || address.value !== display?.address || Number(port.value) !== display?.port;
+  $('#display-control-status').textContent = display?.result ||
+    (samsung ? display?.paired ? 'Samsung TV Paired.' : 'Enable IP Remote on the TV. Save the Address, Then Pair.' :
+      custom ? 'Commands Go to the Saved Address and Port.' : '');
+}
+$('#display-control-form').addEventListener('input', () => renderDisplayControl());
+$('#display-control-form').elements.mode.addEventListener('change', (event) => {
+  const port = $('#display-control-form').elements.port;
+  if (['samsung', 'hybrid'].includes(event.target.value) && ![1515, 1516].includes(Number(port.value))) port.value = 1516;
+  renderDisplayControl();
+});
+form('#display-control-form', async (fields, element) => {
+  const profile = { mode: fields.mode.value, address: fields.address.value.trim(), port: Number(fields.port.value),
+    format: fields.format.value, on: fields.on.value, standby: fields.standby.value };
+  const result = await operate(() => api('display-control', 'PUT', profile), 'Display Control Saved.', element);
+  if (result) await refresh();
+});
+$('#display-pair').addEventListener('click', async () => {
+  const button = $('#display-pair');
+  button.disabled = true;
+  try {
+    await operate(() => api('display-control/pair', 'POST', {}), 'Samsung TV Paired.');
+    await refresh();
+  } finally { renderDisplayControl(); }
+});
+form('#display-command-form', async (fields, element) => {
+  const result = await operate(() => api('display-command', 'POST', { format: fields.format.value, payload: fields.payload.value }),
+    'Custom Display Command Sent.', element);
+  if (result) await refresh();
+});
+
 for (const [selector, power, message] of [['#cec-on', 'on', 'Power On Requested.'], ['#cec-standby', 'standby', 'Standby Requested.']]) {
   $(selector).addEventListener('click', async () => {
     await operate(() => api('display-power', 'POST', { power }), message);

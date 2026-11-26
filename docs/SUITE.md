@@ -63,7 +63,18 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 - **Updates** shows the installed BrightSignOS version. Open the BrightSign updater, sign in to the Diagnostic Web Server, then select **Advanced** and **BrightSignOS Update**. [BrightSign DWS](https://docs.brightsign.biz/manage/diagnostic-web-server-dws)
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
 - **Request HDMI Genlock** is off by default and applies to the selected player in a group. Changing it restarts the player. **Requested · Lock Unverified** means the firmware accepted the request. **Request Rejected · PTP Still Enabled** means playback continues using native PTP. BrightSign documents lock-state readback on XC5 and XT5. [BrightSign video mode API](https://docs.brightsign.biz/develop/rovideomode#set-sync-domain)
-- **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
+- **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily display wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
+
+
+Use the rotate button on a player preview to turn the preview clockwise by 90°. The group saves the angle by player, including when you rearrange the grid.
+
+### Display Control
+
+Open **Device Settings → Display Control** on the player connected to the display. Save the selected mode. The top-bar **Power On** and **Standby** buttons and the display schedule use that mode. HDMI-CEC is the default. The schedule keeps playback running.
+
+- **Samsung IP Control** sends both commands to the TV over the LAN. **CEC Wake / Samsung IP Standby** uses HDMI to wake the TV and the LAN to turn it off. Use the hybrid mode if the Samsung IP service goes offline in standby.
+- On a Samsung TV, open **All Settings → Connections → Network → Expert Settings**. Enable **Power On with Mobile** and **IP Remote**. Enter the TV’s address in SyncPlayer and save. Use port 1516 on current models. Select **Pair Samsung TV** with the TV awake and approve the prompt on the TV. SyncPlayer saves the token and the TV certificate fingerprint locally. Pair again if the certificate changes. Test both buttons before depending on the schedule. [Samsung Consumer IP Control Worksheet](https://image-us.samsung.com/SamsungUS/samsungbusiness/tv-ci-resources/Samsung-IP-Control.pdf)
+- **Custom TCP** and **Custom UDP** use a fixed private IPv4 address and port. Set the two payloads in **Power Commands**. **Hex** sends exact bytes. Include `0D 0A` if the display protocol requires CRLF. **UTF-8 Text** sends the entered characters with no added terminator. **Send One-Off Command** uses the saved destination and accepts its own format and payload. A sent command confirms transport only. Check the actual display response.
 
 ## Lighting input
 
@@ -106,6 +117,12 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `DELETE /sources/{id}` | Send `{}` to remove the saved entry. |
 | `GET /stream-recovery`, `PUT /stream-recovery` | Read available fallback IDs. Send `{"fallback":"presentation"}` to use the SD presentation or `{"fallback":""}` to keep retrying. |
 | `POST /retry-stream` | Send `{}` to try the last selected SRT or RTSP stream again. |
+| `GET /display-control` | Read the active mode, pairing status and last command result. |
+| `PUT /preview-rotation` | Send `{"player":"B","rotation":90}` to save a local preview angle across the group. Output rotation is a separate setting. |
+| `PUT /display-control` | Save `{"mode":"cec"}`, `{"mode":"hybrid","address":"192.168.1.50","port":1516}`, or a `samsung`, `tcp`, or `udp` profile. For TCP and UDP, add `format` (`hex` or `text`), `on` and `standby` payload strings. |
+| `POST /display-control/pair` | Send `{}` and approve the Samsung TV prompt. |
+| `POST /display-power` | Send `{"power":"on"}` or `{"power":"standby"}`. Add `"via":"cec"` for a one-time CEC command. |
+| `POST /display-command` | Send a one-off payload to the saved TCP or UDP destination. Example `{"format":"hex","payload":"50 4F 46 46 0D 0A"}`. |
 | `POST /ident` | Send `{}` for 10 seconds of IDENT or `{"mode":"test-pattern"}` for local colour bars. Use `seconds` to set a duration up to 30 seconds for IDENT or 600 seconds for Test Pattern. Send `{"seconds":0}` to close either. |
 | `PUT /player-layout` | `{"rows":1,"columns":3,"cells":["A","B","C"]}`. Use `null` for an empty cell. |
 | `POST /preview` | Request new thumbnails with `{}`. Read each thumbnail epoch from `/status`. |
@@ -119,7 +136,6 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `GET /lighting`, `PUT /lighting` | Current lighting settings or `{"protocol":"sacn","source":"192.168.1.50","universe":1,"channel":1}`. Use `"protocol":"off"` to close the listener |
 | `PUT /lighting/slots` | `{"slot":1,"id":"...","revision":"..."}`. Pass an empty `id` to clear a slot |
 | `GET /clock`, `PUT /clock` | Live RTC or `{"utc":"2026-11-26T08:00:00.000Z"}` or `{"sydney":"2026-11-26T19:00"}` |
-| `POST /display-power` | Send `{"power":"on"}` or `{"power":"standby"}` to the local HDMI-CEC interface |
 | `PUT /group/audio/B` | Send `{"enabled":true}` or `{"enabled":false}` on the leader to select HDMI audio for Player B |
 | `POST /snapshot` | Send `{}` to capture a 960 × 540 JPEG |
 | `GET /updates` | Read the running version, staged version and GitHub source |

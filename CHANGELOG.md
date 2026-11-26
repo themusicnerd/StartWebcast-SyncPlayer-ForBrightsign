@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.23
+
+- Add 90° preview rotation saved per player across the group.
+- Add Samsung IP Control and custom TCP and UDP display commands. Use the selected method for manual and scheduled power.
+
 ## 0.2.22
 
 - Add a per-player setting to show or hide IDENT on boot. The default is On.
