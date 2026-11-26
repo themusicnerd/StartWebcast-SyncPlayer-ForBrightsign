@@ -7,7 +7,7 @@ Use three spare FAT32 microSD cards with at least 3.2 GB free on each.
 3. Connect displays that accept 4K at 50 Hz. Insert the cards with the players off. Boot B and C, then A. Initial setup can include a reboot for wired PTP domain 15 and a restart to set the HDMI mode. Record the previous PTP and HDMI settings if you need them for rollback.
 4. Enable HDMI-CEC on each display and keep the BrightSign players powered. Each day, Player A requests display wake at 07:00 and standby at 21:00 Sydney time, including weekends and daylight saving. The holding image is placed behind the video plane during wake. A allows a short clock settle then schedules playback automatically. Audio comes from A over HDMI. A schedules the next synced start after each run. Measure the gap at the loop boundary on hardware.
 
-If the cards already have the presentation, copy the matching folder from the small SD update ZIP over the five boot files. The update contains `autorun.brs`, `playback.brs`, `syncplayer.json`, `VERSION` and `SHA256SUMS`. The existing `media` folder supplies the movie and holding image. The schedule uses Player A’s real-time clock, so its date and time need to be valid. You can change the on/off times in the `display_schedule` section of the same configuration on all three cards.
+If the cards already have the presentation, copy the files inside the matching folder from the small SD update ZIP to the card root. The update contains `autorun.brs`, `playback.brs`, `syncplayer.json`, `VERSION` and `SHA256SUMS`, plus the `clock` application files on the leader. The existing `media` folder supplies the movie and holding image. The schedule uses Player A’s real-time clock, so its date and time need to be valid. You can change the on/off times in the `display_schedule` section of the same configuration on all three cards.
 
 For an HD setup, change `output_mode` to `1920x1080x50p` on all three cards. Editing a file changes its recorded SHA-256. The supplied config targets `3840x2160x50p`.
 
@@ -19,9 +19,15 @@ Put the installation password on one line in `dws-password.txt` at the card root
 
 On the trusted LAN, open the player's IP in an HTTPS browser. If the requested static address has not taken effect, check the last responding address. The startup script writes `boot-report.txt` before launching `playback.brs`. This report gives the last completed stage even when video startup fails. `network-setup.txt` records the result of an IPv4 commissioning attempt.
 
+## Leader clock page
+
+The Start SyncPlayer clock page runs on the leader at [192.168.1.11:8080](https://192.168.1.11:8080/). Sign in as `SyncPlayer` with the clock password chosen for this installation. Use **Use this computer’s time** for a quick set or enter a date and time manually in Sydney time. During the repeated hour when daylight saving ends, use the computer clock to give the player an unambiguous time. The page reads the clock back after each set. The player applies the 07:00–21:00 schedule using the updated time. A clock correction can briefly restart playback. Followers receive the leader’s display commands through SyncManager.
+
+The prepared Player A folder carries its private provisioning files in `clock`. For a fresh card made from a shared archive, install OpenSSL on the workstation and run `python tools/provision_clock_web.py path/to/PlayerA`. Keep the private key and password verifier on the leader card. The HTTPS server binds to the leader’s configured LAN address. If the browser asks you to verify the self-signed certificate, compare it with `clock-cert.pem` on the prepared card. You can also supply a certificate issued by your organisation for the leader’s IP.
+
 ## Media verification
 
-For the prepared cards, FFmpeg fully decoded all three source movies, including their audio tracks, without errors. Each has 12,626 video frames at 25 fps over 505.04 seconds. Audio packet timing matched across the set. Each deployed movie matched the source bytes, and every card file passed its SHA-256 manifest check. BrightScript syntax and desktop call-path tests passed. HDMI output, loop gaps, holding display and synchronisation are pending a three-player hardware check.
+For the prepared cards, FFmpeg fully decoded all three source movies, including their audio tracks, without errors. Each has 12,626 video frames at 25 fps over 505.04 seconds. Audio packet timing matched across the set. Each prepared movie matched the source bytes. Player A played its original MP4 at 4K50 output. Loop gaps, display behaviour and frame alignment are pending a three-player hardware check.
 
 ## Preparing another set
 

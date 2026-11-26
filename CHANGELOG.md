@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.6 · 26 November 2026
+
+- Encode clock result flags as strings for the BrightSignOS 9.1.82 Node message bridge.
+
+## 0.1.5 · 26 November 2026
+
+- Add a provisioned, LAN-only HTTPS clock page to the leader card. Operators can copy the computer clock or enter Sydney date and time manually.
+- Set the leader's real-time clock through BrightScript and report the time read back from it.
+
+## 0.1.4 · 26 November 2026
+
+- Validate player membership by enumeration and indexed lookup to avoid a BrightScript runtime failure on BrightSignOS 9.1.82.
+- Confirmed on Player A that the clock survives reboot, the presentation starts and HDMI output is 3840 × 2160 at 50 Hz.
+
 ## 0.1.3 · 26 November 2026
 
 - Use a separate startup script on each presentation card to configure Ethernet and optional authenticated local diagnostics before loading playback.

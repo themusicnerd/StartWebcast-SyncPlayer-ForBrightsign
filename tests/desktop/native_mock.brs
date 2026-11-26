@@ -6,6 +6,10 @@ Sub Main()
 
     config = ParseJson("{""schema_version"":1,""group_id"":""bench"",""ptp_domain"":15,""apply_ptp_settings"":false,""enable_genlock"":false,""loop_mode"":""seamless"",""leader_id"":""A"",""players"":{""192.168.1.11"":""A"",""192.168.1.12"":""B""}}")
     Check(ValidConfig(config), "valid configuration")
+    originalPlayers = config.players
+    config.players = {"192.168.1.11": "A"}
+    Check(not ValidConfig(config), "a one-player group is rejected")
+    config.players = originalPlayers
     config.players["192.168.1.13"] = "A"
     Check(not ValidConfig(config), "duplicate player ID")
     config.players["192.168.1.13"] = "../C"

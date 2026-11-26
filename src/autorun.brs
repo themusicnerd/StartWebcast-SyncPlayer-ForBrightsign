@@ -3,10 +3,12 @@ Sub Main()
     m.playerId = ""
     port = CreateObject("roMessagePort")
     m.holding = invalid
+    m.clockWeb = invalid
+    m.clock = invalid
     RunPlayback(port)
     ' Leave the display idle for diagnosis after a boot or playback fault.
     While true
-        Wait(0, port)
+        HandleClockWeb(Wait(0, port))
     End While
 End Sub
 
@@ -59,6 +61,13 @@ Sub RunPlayback(port As Object)
 
     m.playerId = config.players[address]
     leader = (m.playerId = config.leader_id)
+    If leader And scheduled And cardId = m.playerId And clock <> invalid Then
+        m.clock = clock
+        If ReadAsciiFile(root + "clock/credentials.json") <> "" Then
+            m.clockWeb = CreateObject("roNodeJs", root + "clock/server.js", {message_port: port, arguments: [address]})
+            If m.clockWeb = invalid Then LogEvent("CLOCK_WEB_UNAVAILABLE", {})
+        End If
+    End If
     targetMode = "1920x1080x60p"
     mediaName = "FrameCounter_" + m.playerId + ".mp4"
     contentId = "counter-r1"
@@ -192,7 +201,9 @@ Sub RunPlayback(port As Object)
 
         event = Wait(waitMs, port)
         eventType = Type(event)
-        If eventType = "roSyncManagerEvent" And not leader Then
+        If eventType = "roNodeJsEvent" Then
+            HandleClockWeb(event)
+        Else If eventType = "roSyncManagerEvent" And not leader Then
             syncId = event.GetId()
             timestamp = event.GetIsoTimestamp()
             playing = Left(syncId, Len(syncPrefix)) = syncPrefix
@@ -232,6 +243,34 @@ Sub RunPlayback(port As Object)
     End While
 End Sub
 
+Sub HandleClockWeb(event As Dynamic)
+    If m.clockWeb = invalid Or Type(event) <> "roNodeJsEvent" Then Return
+    payload = event.GetData()
+    If payload.reason <> "message" Or Type(payload.message) <> "roAssociativeArray" Then Return
+    request = payload.message
+    If request.protocol <> "start-syncplayer-clock-v1" Or not TextValue(request.id) Then Return
+    If Len(request.id) <> 32 Then Return
+    ' Keep flags as strings across the native Node message bridge.
+    response = {protocol: request.protocol, id: request.id, ok: "yes", valid: "no"}
+    If request.action = "set" Then
+        response.ok = "no"
+        If TextValue(request.utc) Then
+            utc = CreateObject("roDateTime")
+            If utc.FromIsoString(request.utc) Then
+                If utc.GetYear() >= 2020 And utc.GetYear() < 2038 Then
+                    If m.clock.SetUtcDateTime(utc) Then response.ok = "yes"
+                End If
+            End If
+        End If
+        If response.ok = "yes" Then LogEvent("OPERATOR_CLOCK_SET", {})
+    Else If request.action <> "get" Then
+        Return
+    End If
+    If m.clock.IsValid() Then response.valid = "yes"
+    response.utc = m.clock.GetUtcDateTime().ToIsoString()
+    m.clockWeb.PostJsMessage(response)
+End Sub
+
 Function ValidConfig(config As Dynamic) As Boolean
     If Type(config) <> "roAssociativeArray" Then Return false
     If not WholeNumber(config.schema_version) Then Return false
@@ -247,26 +286,27 @@ Function ValidConfig(config As Dynamic) As Boolean
         If Instr(1, "abcdefghijklmnopqrstuvwxyz0123456789-", Mid(config.group_id, index, 1)) = 0 Then Return false
     End For
     If Type(config.players) <> "roAssociativeArray" Then Return false
-    If config.players.Count() < 2 Or config.players.Count() > 26 Then Return false
-
+    playerCount = 0
     ids = {}
     For Each address In config.players
         playerId = config.players[address]
         If not TextValue(playerId) Then Return false
         If Len(playerId) <> 1 Then Return false
         If Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", playerId) = 0 Then Return false
-        If ids.DoesExist(playerId) Then Return false
+        If ids[playerId] <> invalid Then Return false
         ids[playerId] = true
+        playerCount = playerCount + 1
     End For
+    If playerCount < 2 Or playerCount > 26 Then Return false
     If Len(config.leader_id) <> 1 Then Return false
     If Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.leader_id) = 0 Then Return false
-    If not ids.DoesExist(config.leader_id) Then Return false
+    If ids[config.leader_id] = invalid Then Return false
     If config.card_player_id = invalid Then
         Return config.output_mode = invalid And config.static_ipv4 = invalid And config.display_schedule = invalid
     End If
     If not TextValue(config.card_player_id) Or not TextValue(config.output_mode) Then Return false
     If Len(config.card_player_id) <> 1 Or Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.card_player_id) = 0 Then Return false
-    If not ids.DoesExist(config.card_player_id) Then Return false
+    If ids[config.card_player_id] = invalid Then Return false
     If config.output_mode <> "3840x2160x50p" And config.output_mode <> "1920x1080x50p" Then Return false
     If config.display_schedule <> invalid Then
         If not ValidDisplaySchedule(config.display_schedule) Or config.loop_mode <> "reschedule" Then Return false
@@ -382,7 +422,7 @@ Function WaitForAddress(network As Object, players As Object, port As Object) As
         If Type(current) = "roAssociativeArray" Then
             If TextValue(current.ip4_address) Then
                 address = current.ip4_address
-                If current.link = true And address <> "" And players.DoesExist(address) Then Return address
+                If current.link = true And address <> "" And players[address] <> invalid Then Return address
             End If
         End If
         Wait(1000, port)
@@ -477,7 +517,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.1.3"
+    fields.version = "0.1.6"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)

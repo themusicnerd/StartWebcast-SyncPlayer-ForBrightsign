@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Player clock | Start SyncPlayer</title>
+  <link rel="stylesheet" href="/clock.css">
+  <script src="/clock.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>Start SyncPlayer</header>
+    <h1>Player clock</h1>
+    <p>The leader uses Sydney time for the display schedule.</p>
+    <section aria-labelledby="current-label">
+      <h2 id="current-label">Current time in Sydney</h2>
+      <p><time id="current">Checking the player clock…</time></p>
+      <button type="button" id="computer" disabled>Use this computer’s time</button>
+    </section>
+    <form id="manual">
+      <label for="sydney">Set date and time manually (Sydney)</label>
+      <div class="field">
+        <input id="sydney" type="datetime-local" min="2020-01-02T00:00" max="2037-12-31T23:59" required>
+        <button id="save" type="submit" disabled>Set time</button>
+      </div>
+    </form>
+    <p id="status" role="status"></p>
+  </main>
+</body>
+</html>

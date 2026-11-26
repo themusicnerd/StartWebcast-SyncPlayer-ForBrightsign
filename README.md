@@ -1,6 +1,6 @@
 # Start SyncPlayer
 
-Start Webcast's native three-player XD236 sync proof of concept, version **0.1.3**. It boots from microSD, plays a distinct frame-counter clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Hardware acceptance is pending.
+Start Webcast's native three-player XD236 sync proof of concept, version **0.1.6**. It boots from microSD, plays a distinct clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Three-player hardware acceptance is pending.
 
 | Screen | Role | Primary Ethernet address |
 | --- | --- | --- |
@@ -15,6 +15,8 @@ Use the same release ZIP on all three players. [SD quick start](docs/SD-QUICK-ST
 ## Prepared content cards
 
 Use [the content card guide](docs/CONTENT-CARDS.md) to prepare or copy dedicated A/B/C cards that play a matched 4K25 set with a holding image. The card build preserves the MP4s, shows the holding image during startup and sends audio from the leader over HDMI. It commissions each player's static IPv4 address and runs a daily 07:00–21:00 Sydney HDMI-CEC schedule. Each card can also commission password-protected BrightSign diagnostics at boot.
+
+The provisioned leader card includes the Start SyncPlayer clock page on HTTPS port 8080. It displays the player clock in Sydney time and accepts the operator's computer time or a manual Sydney date and time. See the [clock setup](docs/CONTENT-CARDS.md#leader-clock-page).
 
 ## Build and verify
 
@@ -32,6 +34,7 @@ With npm on the workstation, run the BrightScript source through desktop fakes a
 ```powershell
 python tools/test_native_mocks.py
 npm exec --yes --package=brighterscript@0.73.8 -- bsc --no-project --files src/autorun.brs --create-package false --copy-to-staging false
+node --test tests/desktop/clock_web.test.js
 ```
 
 ## Configuration
@@ -51,4 +54,4 @@ The source is `config/syncplayer.json`. To produce a different common SD build, 
 
 ## Scope
 
-The release covers the first task in the [product specification](PROJECT_SPEC.md). It has no CMS, browser commissioning, peer transfers or REST interface. The [implementation plan](docs/IMPLEMENTATION_PLAN.md) gates that work on native bench results. See the [architecture decision](docs/ADR-001-NATIVE-SYNC.md), [API verification](docs/API_VERIFICATION.md), [0.1.0 test report](docs/TEST_REPORT.md) and [changelog](CHANGELOG.md).
+The release covers native playback and a leader clock page. The [implementation plan](docs/IMPLEMENTATION_PLAN.md) gates browser commissioning, content management and peer transfers on the three-player bench results. See the [architecture decision](docs/ADR-001-NATIVE-SYNC.md), [API verification](docs/API_VERIFICATION.md), [0.1.0 test report](docs/TEST_REPORT.md) and [changelog](CHANGELOG.md).

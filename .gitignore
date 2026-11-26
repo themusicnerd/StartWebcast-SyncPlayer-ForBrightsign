@@ -7,3 +7,6 @@ releases/*.sha256
 /content/
 /sdcard/
 dws-password.txt
+clock-key.pem
+clock-cert.pem
+credentials.json

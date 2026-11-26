@@ -1,0 +1,22 @@
+:root {
+  color-scheme: dark;
+  font: 16px/1.5 system-ui, sans-serif;
+  color: #edf4f5;
+  background: #111b22;
+}
+
+body { margin: 0; }
+main { width: min(37rem, calc(100% - 2rem)); margin: 3rem auto; }
+header { color: #91dfcf; font-weight: 700; letter-spacing: .03em; }
+h1 { margin: .65rem 0 0; font-size: clamp(2rem, 7vw, 3rem); line-height: 1.1; }
+h2, label { font-size: 1rem; font-weight: 650; }
+section { margin: 2rem 0 1.3rem; padding: 1.3rem; background: #21323d; border-radius: .75rem; }
+section h2 { margin: 0; }
+time { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.field { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .5rem; }
+button, input { font: inherit; border: 1px solid #6b8995; border-radius: .45rem; padding: .55rem .75rem; }
+input { color: inherit; background: #21323d; }
+button { color: #11251f; background: #91dfcf; font-weight: 650; cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+#status { min-height: 1.5rem; }
