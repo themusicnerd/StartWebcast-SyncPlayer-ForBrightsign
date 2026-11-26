@@ -105,3 +105,11 @@ All three XD236 units ran the signed 0.2.16 slot and returned to the saved Sync 
 Player C played a workstation-generated H.264 feed using native `roVideoPlayer.PlayFile({Url: ...})` against a local RTSP server. The playback API showed the saved source name and the native startup selection reported RTSP. The saved source listing omitted its URL. [BrightSign video player](https://docs.brightsign.biz/develop/rovideoplayer)
 
 Player B displayed the local 0.2.18 colour bars with its name at the upper right. The captured pixels included the expected red and blue patches. The native decoder continued to play the group video while the pattern was visible.
+
+### 0.2.19 presentation and recovery
+
+All three XD236 consoles reported the A, B and C media files for Nature Is Not a Place. The metadata on each cut was 3840 × 2160 HEVC at 25 fps, AAC-LC audio and 505.04 seconds. Player B previewed its own file while Players A and C continued group playback, then rejoined the group.
+
+Player C edited a saved RTSP source’s name and started it with the existing URL. After the test transmitter stopped, the player retried and switched to the selected SD presentation. Its startup selection still reported the RTSP source. Once the transmitter was available, Retry Last Stream returned it to RTSP. The test source was removed and the prior recovery setting was restored.
+
+Player C decoded a generated SRT feed, accepted Stop and retained the SRT startup selection. After a reboot, the native decoder reopened the same SRT feed without a Play request. Player C returned to the ABC presentation after the test.
