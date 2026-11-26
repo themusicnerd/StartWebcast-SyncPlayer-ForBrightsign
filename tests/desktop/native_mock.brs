@@ -102,6 +102,20 @@ Sub Main()
     rotated = RotatedBounds({x: 10, y: 20, width: 25, height: 30}, 90)
     Check(rotated.x = 50 And rotated.y = 10 And rotated.width = 30 And rotated.height = 25, "rotate a non-fullscreen rectangle")
 
+    output = {SetVolume: FakeVolume, level: -1}
+    audioPanel = {video: output, role: "follower"}
+    outputSettings = {volume: 37, muted: false, audioenabled: true}
+    Check(ApplyVolume(audioPanel, outputSettings) And output.level = 37, "follower audio routes independently")
+    outputSettings.audioenabled = false
+    Check(ApplyVolume(audioPanel, outputSettings) And output.level = 0, "turn off follower audio")
+    timeNetwork = {SetTimeServer: FakeTimeServer, GetTimeServer: FakeReadTimeServer, Apply: FakeApply, sequence: "", server: "default://"}
+    timePanel = {network: timeNetwork, settings: {ntp: "default://"}}
+    ConfigureDefaultNtp(timePanel)
+    Check(timePanel.settings.ntp = "ntp://0.au.pool.ntp.org", "use Australian default NTP")
+    timePanel.settings.ntp = ""
+    ConfigureDefaultNtp(timePanel)
+    Check(timePanel.settings.ntp = "", "keep operator-disabled NTP")
+
     video = {
         PlayFile: FakePlayFile
         accept: true
@@ -254,4 +268,18 @@ End Function
 Function FakeStopClear() As Boolean
     m.cleared = true
     Return true
+End Function
+
+Function FakeVolume(level As Integer) As Boolean
+    m.level = level
+    Return true
+End Function
+
+Function FakeTimeServer(server As String) As Boolean
+    m.server = server
+    Return true
+End Function
+
+Function FakeReadTimeServer() As String
+    Return m.server
 End Function

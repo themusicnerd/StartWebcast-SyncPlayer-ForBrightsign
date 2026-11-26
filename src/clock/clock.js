@@ -132,7 +132,8 @@ async function changeMembership(id, included) {
 
 function renderMembership(players, native) {
   const group = $('#group-members');
-  const snapshot = JSON.stringify(players.map(({ id, member, manageable }) => [id, member, manageable]));
+  const snapshot = JSON.stringify(players.map(({ id, member, manageable, status, audioPending }) =>
+    [id, member, manageable, status?.audioenabled, status?.muted, status?.volume === 0, audioPending]));
   if (group.dataset.snapshot === snapshot) return;
   group.dataset.snapshot = snapshot;
   const focused = document.activeElement?.dataset?.member;
@@ -140,15 +141,31 @@ function renderMembership(players, native) {
     const row = item('div', undefined, 'membership-row');
     const text = item('div');
     text.append(item('strong', `Player ${player.id}`), item('p', !player.member ? 'Outside the Group' : player.id === native?.playerid ? 'Local Player' : 'Group Member'));
+    const audio = player.status?.audioenabled;
+    const pending = typeof player.audioPending === 'boolean';
+    if (pending) text.append(item('p', player.audioPending ? 'Audio On Pending' : 'Audio Off Pending'));
+    else if (typeof audio === 'boolean') text.append(item('p', !audio ? 'Audio Off' : player.status.muted || player.status.volume === 0 ? 'Audio Muted' : 'Audio On'));
     row.append(text);
+    const controls = item('div', undefined, 'group-controls');
+    const groupOwner = native?.role === 'leader' && native.playerid === player.id;
+    if (player.member && (groupOwner || player.manageable) && (typeof audio === 'boolean' || pending)) {
+      const enabled = !(pending ? player.audioPending : audio);
+      const button = action(enabled ? 'Enable Audio' : 'Disable Audio', async () => {
+        await operate(() => api(`group/audio/${player.id}`, 'PUT', { enabled }), `HDMI Audio ${enabled ? 'On' : 'Off'} Requested for Player ${player.id}.`);
+        await refresh();
+      });
+      button.setAttribute('aria-label', `${enabled ? 'Enable' : 'Disable'} Audio on Player ${player.id}`);
+      controls.append(button);
+    }
     if (player.manageable && player.member) {
       const button = action('Remove From Group', async () => {
         if (confirm(`Remove Player ${player.id} From the Active Playback Group?`)) await changeMembership(player.id, false);
       });
       button.dataset.member = player.id;
       button.setAttribute('aria-label', `Remove Player ${player.id} From the Group`);
-      row.append(button);
+      controls.append(button);
     }
+    if (controls.childElementCount) row.append(controls);
     return row;
   });
   group.replaceChildren(...rows);
@@ -173,7 +190,7 @@ function renderStatus() {
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
     if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
-    $('#audio-owner').textContent = native.role === 'follower' ? 'Follower audio is muted. The leader supplies HDMI audio.' : 'Volume controls the native video and SRT audio.';
+    $('#audio-owner').textContent = 'Use HDMI Audio and Volume to Control Native Video and SRT Audio on This Player.';
     $('#cec-on').disabled = $('#cec-standby').disabled = !native.cecavailable;
     $('#snapshot').disabled = native.state === 'booting';
     const power = { on: 'TV On', off: 'TV Off', unknown: 'TV Unknown' };
@@ -184,7 +201,7 @@ function renderStatus() {
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
-    fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted });
+    fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
     fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
@@ -203,7 +220,7 @@ function renderStatus() {
     const heard = ptp.listening ? (ptp.domains.length ? `Heard on LAN ${ptp.domains.join(', ')}` : 'No multicast announcements heard recently') : 'Multicast listener unavailable';
     $('#ptp-use').textContent = [...reports, heard].join(' · ');
     const network = native.ntpresult;
-    $('#ntp-status').textContent = network?.failure_reason ? `Last attempt: ${network.failure_reason}` : network?.success_timestamp ? 'The player reports a successful network update.' : 'An empty server disables network time. An interval of 0 uses the default.';
+    $('#ntp-status').textContent = network?.failure_reason ? `Last attempt: ${network.failure_reason}` : network?.success_timestamp ? 'The player reports a successful network update.' : 'The default server is 0.au.pool.ntp.org. An empty server disables network time.';
   }
   const active = players.filter(({ member }) => member);
   const suffixes = (native?.role === 'standalone' ? [native.playerid] : active.map(({ id }) => id)).map((id) => `Welcome_${id}.mp4`);
@@ -432,7 +449,7 @@ $('#av-form').elements.volume.addEventListener('input', (event) => { $('#volume-
 form('#av-form', (fields, element) => {
   const rotation = Number(fields.rotation.value);
   const restart = fields.output.value !== dashboard?.native?.output || rotation !== (dashboard?.native?.rotation ?? 0);
-  saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
+  saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked, audioenabled: fields.audioenabled.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
 });
 for (const [selector, power, message] of [['#cec-on', 'on', 'Power On Requested.'], ['#cec-standby', 'standby', 'Standby Requested.']]) {
   $(selector).addEventListener('click', async () => {

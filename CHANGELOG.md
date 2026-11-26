@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.10
+
+- Enable HDMI audio on every player by default. Select any combination of active players in Group Membership, or set HDMI Audio on each player.
+- Use `0.au.pool.ntp.org` for the factory default time server. Keep operator-selected time servers and disabled NTP settings.
+
 ## 0.2.9
 
 - Add per-player Output Rotation next to Output Resolution. Rotate the native video, web layers and holding image by the same angle.

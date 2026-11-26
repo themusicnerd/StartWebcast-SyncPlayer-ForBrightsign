@@ -64,10 +64,10 @@
     <section class="section" id="settings" aria-labelledby="settings-title">
       <div class="section-heading"><h2 id="settings-title">Device Settings</h2></div>
       <div class="grid grid-quarters">
-        <article class="panel"><form id="av-form" class="stack"><h3>HDMI &amp; Audio</h3><label>Output Resolution<select name="output"><option value="3840x2160x50p">3840 × 2160 · 50 Hz</option><option value="1920x1080x50p">1920 × 1080 · 50 Hz</option></select></label><label>Output Rotation<select name="rotation"><option value="0">0°</option><option value="90">90° Clockwise</option><option value="180">180°</option><option value="270">270° Clockwise</option></select></label><div class="form-row"><label class="grow">Volume <output id="volume-label"></output><input type="range" name="volume" min="0" max="100"></label><label class="check"><input type="checkbox" name="muted"> Mute</label></div><p id="audio-owner" class="muted"></p><button type="submit">Save HDMI &amp; Audio</button></form></article>
+        <article class="panel"><form id="av-form" class="stack"><h3>HDMI &amp; Audio</h3><label>Output Resolution<select name="output"><option value="3840x2160x50p">3840 × 2160 · 50 Hz</option><option value="1920x1080x50p">1920 × 1080 · 50 Hz</option></select></label><label>Output Rotation<select name="rotation"><option value="0">0°</option><option value="90">90° Clockwise</option><option value="180">180°</option><option value="270">270° Clockwise</option></select></label><label class="check"><input type="checkbox" name="audioenabled" checked> HDMI Audio</label><div class="form-row"><label class="grow">Volume <output id="volume-label"></output><input type="range" name="volume" min="0" max="100"></label><label class="check"><input type="checkbox" name="muted"> Mute</label></div><p id="audio-owner" class="muted"></p><button type="submit">Save HDMI &amp; Audio</button></form></article>
         <article class="panel"><form id="role-form" class="stack"><h3>Playback Mode &amp; PTP</h3><div class="form-row"><label class="grow">Mode<select name="role"><option value="leader">Leader</option><option value="follower">Follower</option><option value="standalone">Standalone</option></select></label><label class="grow">Leader Player<select name="leader"></select></label></div><div class="form-row"><label class="grow">Sync Group Name<input name="group" type="text" maxlength="48" pattern="[a-z0-9\-]+" required></label><label>PTP Domain<input name="domain" type="number" min="0" max="127" required></label></div><p id="ptp-use" class="muted">Reading PTP announcements…</p><button type="submit">Save Mode &amp; PTP</button></form></article>
         <article class="panel"><h3>Clock &amp; Schedule</h3><p><time id="current">Reading Sydney time…</time></p><div class="actions"><button type="button" class="secondary" id="computer">Use This Computer’s Time</button></div><form id="manual" class="stack"><div class="form-row"><label class="grow">Sydney Date and Time<input id="sydney" type="datetime-local" required></label><button id="save" type="submit" class="secondary">Set Time</button></div></form><form id="schedule-form" class="stack"><label class="check"><input type="checkbox" name="enabled" checked> Enable Display Schedule</label><div class="form-row"><label>Daily Wake<input name="on" type="time" required></label><label>Daily Standby<input name="off" type="time" required></label><button type="submit" class="secondary">Save Schedule</button></div><p class="muted" id="schedule-help"></p></form></article>
-        <article class="panel"><form id="ntp-form" class="stack"><h3>Network Time</h3><label>NTP Server<input type="text" name="ntp" spellcheck="false" placeholder="ntp://time.example.local"></label><label>Update Interval (Seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
+        <article class="panel"><form id="ntp-form" class="stack"><h3>Network Time</h3><label>NTP Server<input type="text" name="ntp" spellcheck="false" placeholder="0.au.pool.ntp.org"></label><label>Update Interval (Seconds)<input type="number" name="interval" min="0" max="86400" required></label><p id="ntp-status" class="muted">An empty server disables network time. An interval of 0 uses the default.</p><button type="submit">Save NTP</button></form></article>
       </div>
     </section>
 
@@ -133,11 +133,12 @@
             <li>Open <a href="#settings">Settings</a>.</li>
             <li>Select an output resolution in <strong>HDMI &amp; Audio</strong>.</li>
             <li>Select an angle in <strong>Output Rotation</strong>.</li>
+            <li>Select <strong>HDMI Audio</strong> to enable audio on this player.</li>
             <li>Set the volume or select <strong>Mute</strong>.</li>
             <li>Select <strong>Save HDMI &amp; Audio</strong>.</li>
             <li>In <strong>Network Time</strong>, enter the NTP server to use.</li>
             <li>Select <strong>Save NTP</strong>.</li>
-          </ol><p>A resolution or rotation change restarts the player. A follower’s audio stays muted during group playback.</p></details>
+          </ol><p>A resolution or rotation change restarts the player. All players can play audio. Select the audio players in Group Membership.</p></details>
           <details><summary>Set Sources, Layers and Lighting</summary><ol>
             <li>Open <a href="#sources">Sources &amp; Layers</a>.</li>
             <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
@@ -182,6 +183,7 @@
               <dt>POST <code>/pause</code>, <code>/resume</code> or <code>/stop</code></dt><dd>Send <code>{}</code>.</dd>
               <dt>POST <code>/seek</code></dt><dd>Send <code>{"positionMs":30000}</code> to move a local MP4 to 30 seconds.</dd>
               <dt>PUT <code>/group/members/B</code></dt><dd>Send <code>{"included":true}</code> to add provisioned Player B.</dd>
+              <dt>PUT <code>/group/audio/B</code></dt><dd>Send <code>{"enabled":true}</code> to enable HDMI audio on Player B.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
               <dt>GET <code>/updates</code></dt><dd>Read the running version and GitHub source.</dd>

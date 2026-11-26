@@ -112,5 +112,13 @@ test('persists membership, protects the leader and gates synchronised pause and 
     assert.deepEqual(saved.excluded, ['B']);
     await suite.setMember('B', true);
     assert.deepEqual(suite.activeMembers(), ['A', 'B']);
+    await suite.setGroupAudio('B', false);
+    const audioChoice = JSON.parse(await fs.readFile(join(root, 'index.json'), 'utf8')).audioCommands.B;
+    assert.equal(audioChoice.enabled, false);
+    assert.match(audioChoice.revision, /^[a-f0-9]{24}$/);
+    assert.equal(suite.snapshot().players[1].audioPending, false);
+    await suite.setGroupAudio('A', true);
+    assert.deepEqual(actions.at(-1), ['settings', { audioenabled: true }]);
+    await assert.rejects(suite.setGroupAudio('C', true), /Active Group/);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

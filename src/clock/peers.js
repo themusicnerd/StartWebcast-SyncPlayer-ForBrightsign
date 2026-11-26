@@ -101,6 +101,9 @@ class Follower {
       const admitted = reply.admitted !== false;
       if (!admitted) this.ready = '';
       await this.native('membership', { admitted, wake: typeof reply.wake === 'boolean' ? reply.wake : undefined });
+      if (admitted && reply.audio && typeof reply.audio.enabled === 'boolean' && idPattern.test(reply.audio.revision)) {
+        await this.native('peer-audio', reply.audio);
+      }
       if (admitted && reply.assignment && reply.assignment.revision !== this.ready && !this.preparing) {
         this.preparing = true;
         void this.prepare(node, base, reply.assignment).then(() => { this.problem = ''; }).catch((error) => {

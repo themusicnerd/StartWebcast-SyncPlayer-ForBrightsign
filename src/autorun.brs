@@ -92,6 +92,7 @@ Sub RunPlayback(port As Object)
     panel = NewPanel(config, device, mode, network, clock, root, address, targetMode, mediaPath, contentId, port)
     m.panel = panel
     m.clock = clock
+    If scheduled Then ConfigureDefaultNtp(panel)
     If scheduled And cardId = m.playerId And clock <> invalid Then
         If ReadAsciiFile(root + "clock/credentials.json") <> "" Then
             m.clockWeb = CreateObject("roNodeJs", m.runtime + "clock/server.js", {message_port: port, arguments: [address, m.slot]})
@@ -151,7 +152,7 @@ Sub RunPlayback(port As Object)
             m.holding = invalid
             m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg", panel.settings.rotation)
         End If
-        If not ConfigureCardAudio(video, panel.role <> "follower") Then Return
+        If not ConfigureCardAudio(video) Then Return
         ApplyVolume(panel, panel.settings)
         video.SetRectangle(PanelBounds(panel, panel.settings.rect))
         panel.graphicsFront = mode.SetGraphicsZOrder("front")
@@ -240,7 +241,7 @@ Sub HandleClockWeb(event As Dynamic)
 End Sub
 
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
-    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, audiorevision: "", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
     If m.playerId = config.leader_id Then settings.role = "leader"
     scheduled = config.display_schedule <> invalid
     If scheduled Then
@@ -288,6 +289,8 @@ Function PanelStatus(panel As Object) As Object
     data.colour = panel.colour
     data.scheduleenabled = panel.settings.scheduleenabled
     data.rotation = panel.settings.rotation
+    data.audioenabled = panel.settings.audioenabled
+    data.audiorevision = panel.settings.audiorevision
     If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
     data.cecrequest = panel.cecRequest
@@ -390,9 +393,22 @@ End Function
 Function ApplyVolume(panel As Object, settings As Object) As Boolean
     If panel.video = invalid Then Return true
     volume = settings.volume
-    If settings.muted Or panel.role = "follower" Then volume = 0
+    If settings.muted Or settings.audioenabled = false Then volume = 0
     Return panel.video.SetVolume(volume)
 End Function
+
+Sub ConfigureDefaultNtp(panel As Object)
+    current = panel.settings.ntp
+    If current <> "default://" And current <> "ntp://time.brightsignnetwork.com" Then Return
+    defaultServer = "ntp://0.au.pool.ntp.org"
+    If panel.network.SetTimeServer(defaultServer) Then
+        If panel.network.Apply() Then
+            panel.settings.ntp = panel.network.GetTimeServer()
+            Return
+        End If
+    End If
+    LogEvent("DEFAULT_NTP_REJECTED", {})
+End Sub
 
 Function SafeHex(value As Dynamic, length As Integer) As Boolean
     If not TextValue(value) Then Return false
@@ -761,6 +777,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If not ValidPanelGroup(nextSettings.group) Or not ValidPanelRect(nextSettings.rect) Or not BooleanValue(nextSettings.muted) Then Return "Invalid group or video window."
     If nextSettings.output <> "3840x2160x50p" And nextSettings.output <> "1920x1080x50p" Then Return "Unsupported HDMI mode."
     If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
+    If not BooleanValue(nextSettings.audioenabled) Then Return "Choose Whether to Enable HDMI Audio."
     If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
     If nextSettings.overlay <> "" And not PanelWebUrl(nextSettings.overlay) Then Return "Invalid overlay URL."
     If nextSettings.ntp <> panel.settings.ntp Or nextSettings.interval <> panel.settings.interval Then
@@ -785,14 +802,19 @@ Function PanelSet(panel As Object, patch As Object) As String
     Else
         change = ""
     End If
-    If not SavePanel(panel, nextSettings) Then Return "Settings could not be written."
+    If change = "" Then
+        If not ApplyVolume(panel, nextSettings) Then Return "The player rejected the volume setting."
+    End If
+    If not SavePanel(panel, nextSettings) Then
+        If change = "" Then ApplyVolume(panel, old)
+        Return "Settings could not be written."
+    End If
     panel.settings = nextSettings
     If change <> "" Then
         panel.change = change
         panel.rebootAt = UpTime(0) + 3
         Return ""
     End If
-    If not ApplyVolume(panel, nextSettings) Then Return "The player rejected the volume setting."
     If FormatJson(old.rect) <> FormatJson(nextSettings.rect) And panel.video <> invalid Then
         panel.video.SetRectangle(PanelBounds(panel, nextSettings.rect))
         If panel.base <> invalid And panel.source = "web" Then StartPanel(panel)
@@ -812,6 +834,11 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         Return "The native file probe rejected this media."
     Else If action = "settings" Then
         Return PanelSet(panel, body)
+    Else If action = "peer-audio" Then
+        If panel.role <> "follower" Or not panel.ready Or UpTime(0) >= panel.memberUntil Then Return "Group Audio Requires an Active Follower."
+        If not BooleanValue(body.enabled) Or not SafeHex(body.revision, 24) Then Return "Invalid Group Audio Request."
+        If body.revision = panel.settings.audiorevision Then Return ""
+        Return PanelSet(panel, {audioenabled: body.enabled, audiorevision: body.revision})
     Else If action = "membership" Then
         If panel.role <> "follower" Or not BooleanValue(body.admitted) Then Return "Invalid follower membership."
         If body.admitted Then
@@ -1085,16 +1112,12 @@ Function ShowHolding(mode As Object, path As String, rotation = 0 As Integer) As
     Return holding
 End Function
 
-Function ConfigureCardAudio(video As Object, leader As Boolean) As Boolean
-    If leader Then
-        audio = CreateObject("roAudioOutput", "hdmi")
-        If audio <> invalid Then
-            If video.SetPcmAudioOutputs(audio) Then Return true
-        End If
-    Else
-        If video.SetVolume(0) Then Return true
+Function ConfigureCardAudio(video As Object) As Boolean
+    audio = CreateObject("roAudioOutput", "hdmi")
+    If audio <> invalid Then
+        If video.SetPcmAudioOutputs(audio) Then Return true
     End If
-    LogEvent("AUDIO_CONFIGURATION_REJECTED", {leader: leader})
+    LogEvent("AUDIO_CONFIGURATION_REJECTED", {})
     Return false
 End Function
 

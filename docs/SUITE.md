@@ -10,6 +10,8 @@ The top bar shows HDMI-reported TV power. **Power On** and **Standby** send loca
 
 Set **Output Rotation** in **HDMI & Audio**. Select 0°, 90°, 180° or 270° clockwise for each player. Save the setting to restart that player. The video and graphics layers rotate together, and the layout window follows the rotated coordinates. [Video Rotation API](https://docs.brightsign.biz/develop/rovideoplayer) · [HTML Widget Rotation](https://docs.brightsign.biz/develop/rohtmlwidget)
 
+All players use HDMI audio by default. Use **Enable Audio** or **Disable Audio** in **Group Membership** on the leader to select any combination of players. In **HDMI & Audio**, set the local audio, volume or mute. The group audio state displays Pending until the follower acknowledges the change.
+
 Open **Help** in the top bar for offline console procedures and API examples. The instructions follow ASD-STE100 style with short commands in operating order. [ASD-STE100 Issue 9](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)
 
 Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.168.1.11`, `192.168.1.12` and `192.168.1.13`. Sign in with the installation credentials. The BrightSign diagnostics server uses its own HTTPS address on port 443. The bundled interface and local library work without internet access.
@@ -37,7 +39,7 @@ For SRT, use `srt://encoder:port?mode=caller` from a compatible encoder in liste
 
 - **HDMI & audio** changes the selected player between 4K50 and 1080p50 and sets native MP4 and SRT volume. The mode change restarts the application. Synchronized players use matching output modes. Follower MP4 audio stays muted.
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
-- **Clock & schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A sizable clock change can briefly restart playback. **Network time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
+- **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
 ## Lighting input
 
@@ -82,11 +84,12 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `PUT /lighting/slots` | `{"slot":1,"id":"...","revision":"..."}`. Pass an empty `id` to clear a slot |
 | `GET /clock`, `PUT /clock` | Live RTC or `{"utc":"2026-11-26T08:00:00.000Z"}` or `{"sydney":"2026-11-26T19:00"}` |
 | `POST /display-power` | Send `{"power":"on"}` or `{"power":"standby"}` to the local HDMI-CEC interface |
+| `PUT /group/audio/B` | Send `{"enabled":true}` or `{"enabled":false}` on the leader to select HDMI audio for Player B |
 | `POST /snapshot` | Send `{}` to capture a 960 × 540 JPEG |
 | `GET /updates` | Read the running version, staged version and GitHub source |
 | `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` as the revision for a draft |
 
-`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
+`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 
 From a workstation, use the specific player's public `clock-cert.pem` for HTTPS verification. These examples prompt for the installation password.
 

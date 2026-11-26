@@ -1,6 +1,6 @@
 'use strict';
 
-const { createHash, timingSafeEqual } = require('node:crypto');
+const { createHash, randomBytes, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
 const io = require('node:fs/promises');
 const { isIP } = require('node:net');
@@ -55,12 +55,13 @@ function sourceUrl(value, type) {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
   if ('volume' in safe && (!Number.isInteger(safe.volume) || safe.volume < 0 || safe.volume > 100)) throw new RequestError(400, 'Volume must be between 0 and 100.');
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
+  if ('audioenabled' in safe && typeof safe.audioenabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
   if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
   if ('rotation' in safe && ![0, 90, 180, 270].includes(safe.rotation)) throw new RequestError(400, 'Choose 0°, 90°, 180° or 270°.');
@@ -179,6 +180,24 @@ class Suite {
     return this.snapshot().players;
   }
 
+  async setGroupAudio(id, enabled) {
+    this.ensureLeader();
+    if (typeof enabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
+    if (!this.activeMembers().includes(id) || (id !== this.id && !digestPattern.test(this.exchange.clients?.[id]))) {
+      throw new RequestError(400, 'Choose a Player in the Active Group.');
+    }
+    if (id === this.id) {
+      await this.call('settings', { audioenabled: enabled });
+    } else {
+      await this.library.transaction((next) => {
+        next.audioCommands ??= {};
+        next.audioCommands[id] = { enabled, revision: randomBytes(12).toString('hex') };
+      });
+    }
+    this.note(`Requested HDMI audio ${enabled ? 'on' : 'off'} for Player ${id}`);
+    return this.snapshot().players;
+  }
+
   receivePlayback(raw) {
     if (typeof raw !== 'string' || raw.length > 8192) return;
     try {
@@ -246,7 +265,9 @@ class Suite {
       if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true };
       const peer = this.peers.get(id);
       const recent = peer && performance.now() - peer.seen < onlineMs;
-      return { id, ip: this.addresses[id], connection: recent ? 'online' : 'offline', lastSeen: peer?.at || null,
+      const command = this.library.state.audioCommands?.[id];
+      const audioPending = active.includes(id) && command && command.revision !== peer?.status.audiorevision ? command.enabled : null;
+      return { id, ip: this.addresses[id], connection: recent ? 'online' : 'offline', lastSeen: peer?.at || null, audioPending,
         status: recent ? peer.status : null, ready: recent ? peer.ready : '', problem: recent ? peer.problem : '', member: active.includes(id),
         manageable: native?.role === 'leader' && digestPattern.test(this.exchange.clients?.[id]) };
     });
@@ -288,6 +309,13 @@ class Suite {
 
   async operator(request, response, url, json, send) {
     const path = url.pathname;
+    const audio = /^\/api\/v1\/group\/audio\/([A-Z])$/.exec(path);
+    if (audio && request.method === 'PUT') {
+      return json(response, 200, await this.update(request, async () => {
+        const { enabled } = await readJson(request);
+        return this.setGroupAudio(audio[1], enabled);
+      }));
+    }
     if (path === '/api/v1/snapshot' && request.method === 'POST') {
       if (request.headers['idempotency-key']) throw new RequestError(400, 'Snapshots Use a New Capture for Each Request.');
       await readJson(request);
@@ -444,7 +472,9 @@ class Suite {
       this.peers.set(player, { status: native, ready, problem: String(body.problem || '').slice(0, 160), seen: performance.now(), at: new Date().toISOString() });
       const matches = native.domain === this.status.domain && native.group === this.status.group;
       const admitted = matches && this.activeMembers().includes(player);
+      const audio = admitted && this.library.state.audioCommands?.[player];
       return json(response, 200, { admitted, wake: admitted ? this.status.scheduledwake : undefined,
+        audio: audio && audio.revision !== native.audiorevision ? audio : undefined,
         assignment: admitted ? this.library.assignment(player) : null });
     }
     if (match[3] && request.method === 'GET') {
