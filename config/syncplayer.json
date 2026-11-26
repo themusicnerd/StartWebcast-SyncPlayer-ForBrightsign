@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "group_id": "start-syncplayer-bench",
+  "ptp_domain": 15,
+  "apply_ptp_settings": false,
+  "enable_genlock": false,
+  "loop_mode": "seamless",
+  "leader_id": "A",
+  "players": {
+    "192.168.1.11": "A",
+    "192.168.1.12": "B",
+    "192.168.1.13": "C"
+  }
+}
