@@ -60,8 +60,6 @@ Sub RunPlayback(port As Object)
         clock = CreateObject("roSystemTime")
         If clock = invalid Then
             LogEvent("SCHEDULE_CLOCK_UNAVAILABLE", {})
-        Else If UCase(clock.GetTimeZone()) <> "AEST" Then
-            If not clock.SetTimeZone("AEST") Then LogEvent("TIME_ZONE_REJECTED", {})
         End If
     End If
 
@@ -106,6 +104,13 @@ Sub RunPlayback(port As Object)
     End For
     m.panel = panel
     m.clock = clock
+    If clock <> invalid Then
+        If not ApplyTimeZone(clock, panel.settings.timezone) Then
+            LogEvent("TIME_ZONE_REJECTED", {zone: panel.settings.timezone})
+            panel.settings.timezone = "Australia/Sydney"
+            ApplyTimeZone(clock, panel.settings.timezone)
+        End If
+    End If
     If scheduled Then ConfigureDefaultNtp(panel)
     If scheduled And cardId = m.playerId And clock <> invalid Then
         If ReadAsciiFile(root + "clock/credentials.json") <> "" Then
@@ -249,12 +254,16 @@ Sub HandleClockWeb(event As Dynamic)
             utc = CreateObject("roDateTime")
             If utc.FromIsoString(request.utc) Then
                 If utc.GetYear() >= 2020 And utc.GetYear() < 2038 Then
-                    If m.clock.SetUtcDateTime(utc) Then response.ok = "yes"
+                    If m.clock.SetUtcDateTime(utc) Then
+                        response.ok = "yes"
+                        If m.panel <> invalid Then m.panel.wakeSample = invalid
+                    End If
                 End If
             End If
         End If
         If response.ok = "yes" Then LogEvent("OPERATOR_CLOCK_SET", {})
     End If
+    If m.panel <> invalid Then response.timeZone = m.panel.settings.timezone
     If m.clock.IsValid() Then response.valid = "yes"
     response.utc = m.clock.GetUtcDateTime().ToIsoString()
     m.clockWeb.PostJsMessage(response)
@@ -265,6 +274,13 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     settings.streamfallback = {id: "", asset: "", name: ""}
     settings.genlock = config.enable_genlock
     settings.identonboot = showBootImages
+    settings.scheduledst = true
+    settings.restartonwake = false
+    settings.scheduleweekly = false
+    settings.week = []
+    settings.lastscheduledrestart = ""
+    settings.timezone = "Australia/Sydney"
+    If config.display_schedule <> invalid Then settings.timezone = config.display_schedule.timezone
     title = ReadAsciiFile(root + "presentation-title.txt").Trim()
     If Len(title) > 0 And Len(title) <= 100 Then settings.presentationtitle = title
     If m.playerId = config.leader_id Then settings.role = "leader"
@@ -281,6 +297,15 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
         End For
     End If
     If not ValidRotation(settings.rotation) Then settings.rotation = 0
+    If not BooleanValue(settings.scheduledst) Then settings.scheduledst = true
+    If not BooleanValue(settings.restartonwake) Then settings.restartonwake = false
+    If not BooleanValue(settings.scheduleweekly) Then settings.scheduleweekly = false
+    If not ValidScheduleWeek(settings.week) Then
+        settings.scheduleweekly = false
+        settings.week = []
+    End If
+    If not TextValue(settings.lastscheduledrestart) Then settings.lastscheduledrestart = ""
+    If ClockZone(settings.timezone) = invalid Then settings.timezone = "Australia/Sydney"
     If not BooleanValue(settings.genlock) Then settings.genlock = config.enable_genlock
     If settings.intent = "stop" Then settings.intent = "auto"
     config.group_id = settings.group
@@ -291,6 +316,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: settings.presentationtitle, source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
     panel.localOverride = false
     panel.groupCue = invalid
+    panel.wakeSample = invalid
     panel.bootImages = showBootImages
     panel.genlockState = "off"
     RestoreSelection(panel)
@@ -343,6 +369,12 @@ Function PanelStatus(panel As Object) As Object
     data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: m.version}
     data.colour = panel.colour
     data.scheduleenabled = panel.settings.scheduleenabled
+    data.scheduledst = panel.settings.scheduledst
+    data.restartonwake = panel.settings.restartonwake
+    data.scheduleweekly = panel.settings.scheduleweekly
+    data.week = panel.settings.week
+    data.timezone = panel.settings.timezone
+    data.timezones = ClockZones()
     data.rotation = panel.settings.rotation
     data.audioenabled = panel.settings.audioenabled
     data.audiorevision = panel.settings.audiorevision
@@ -705,7 +737,7 @@ Function ShowStartupCard(panel As Object, kind = "details" As String) As Boolean
     HideStartupCard(panel)
     encoding = CreateObject("roUrlTransfer")
     If encoding = invalid Then Return false
-    data = {player: m.playerId, mode: kind, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp}
+    data = {player: m.playerId, mode: kind, ip: panel.address, mac: "", serial: panel.serial, model: panel.model, firmware: panel.firmware, version: m.version, repository: "themusicnerd/StartWebcast-SyncPlayer-ForBrightsign", output: panel.mode.GetMode(), rotation: panel.settings.rotation, audio: panel.settings.audioenabled, volume: panel.settings.volume, mute: panel.settings.muted, domain: panel.settings.domain, role: panel.role, group: panel.settings.group, ntp: panel.settings.ntp, timezone: panel.settings.timezone}
     network = panel.network.GetCurrentConfig()
     If Type(network) = "roAssociativeArray" And TextValue(network.ethernet_mac) Then data.mac = network.ethernet_mac
     updater = ParseJson(ReadAsciiFile(panel.root + "updates/github.json"))
@@ -988,11 +1020,7 @@ Sub PanelTick(panel As Object)
         End If
     End If
     If panel.role <> "follower" Then
-        wake = invalid
-        If panel.scheduled And panel.settings.scheduleenabled = true And panel.clock <> invalid Then
-            If panel.clock.IsValid() Then wake = ScheduleAllows(panel.clock, panel.settings)
-        End If
-        ApplyScheduledPower(panel, wake)
+        TickDisplaySchedule(panel)
     End If
     If not panel.autostart Then
         panel.autostart = true
@@ -1177,6 +1205,11 @@ Function PanelSet(panel As Object, patch As Object) As String
     If not BooleanValue(nextSettings.cecremote) Then Return "Choose Whether to Enable CEC Remote Playback."
     If not BooleanValue(nextSettings.genlock) Then Return "Choose Whether to Request HDMI Genlock."
     If not BooleanValue(nextSettings.identonboot) Then Return "Choose Whether to Show IDENT on Boot."
+    If ClockZone(nextSettings.timezone) = invalid Then Return "Choose a Supported Time Zone."
+    If not BooleanValue(nextSettings.scheduledst) Or not BooleanValue(nextSettings.restartonwake) Or not BooleanValue(nextSettings.scheduleweekly) Then Return "Invalid Display Schedule Options."
+    If nextSettings.scheduleweekly Or patch.week <> invalid Then
+        If not ValidScheduleWeek(nextSettings.week) Then Return "Enter Valid Wake and Standby Times for All Seven Days."
+    End If
     fallback = nextSettings.streamfallback
     If Type(fallback) <> "roAssociativeArray" Then Return "Invalid Stream Fallback."
     If not TextValue(fallback.id) Or not TextValue(fallback.name) Or not TextValue(fallback.asset) Then Return "Invalid Stream Fallback."
@@ -1215,11 +1248,22 @@ Function PanelSet(panel As Object, patch As Object) As String
     If change = "" Then
         If not ApplyVolume(panel, nextSettings) Then Return "The player rejected the volume setting."
     End If
+    zoneChanged = nextSettings.timezone <> old.timezone
+    If zoneChanged Then
+        If not ApplyTimeZone(panel.clock, nextSettings.timezone) Then
+            If change = "" Then ApplyVolume(panel, old)
+            Return "The Player Rejected the Time Zone."
+        End If
+    End If
     If not SavePanel(panel, nextSettings) Then
+        If zoneChanged Then ApplyTimeZone(panel.clock, old.timezone)
         If change = "" Then ApplyVolume(panel, old)
         Return "Settings could not be written."
     End If
     panel.settings = nextSettings
+    If zoneChanged Or old.on <> nextSettings.on Or old.off <> nextSettings.off Or old.scheduleenabled <> nextSettings.scheduleenabled Or old.scheduledst <> nextSettings.scheduledst Or old.restartonwake <> nextSettings.restartonwake Or old.scheduleweekly <> nextSettings.scheduleweekly Or FormatJson(old.week) <> FormatJson(nextSettings.week) Then
+        panel.wakeSample = invalid
+    End If
     If panel.source = "built-in" Or panel.source = "built-in-local" Then panel.name = nextSettings.presentationtitle
     If change <> "" Then
         panel.change = change
@@ -1510,10 +1554,48 @@ Function ValidConfig(config As Dynamic) As Boolean
     Return true
 End Function
 
+Function ClockZones() As Object
+    If m.clockZones <> invalid Then Return m.clockZones
+    zoneList = []
+    zoneList.Push({id: "Australia/Sydney", name: "Sydney, Melbourne, Hobart", code: "AEST", standard: "AEST1"})
+    zoneList.Push({id: "Australia/Brisbane", name: "Brisbane", code: "AEST1"})
+    zoneList.Push({id: "Australia/Adelaide", name: "Adelaide", code: "ACST", standard: "ACST1"})
+    zoneList.Push({id: "Australia/Darwin", name: "Darwin", code: "ACST1"})
+    zoneList.Push({id: "Australia/Perth", name: "Perth", code: "AWST1"})
+    zoneList.Push({id: "Pacific/Auckland", name: "Auckland, Wellington", code: "NZST", standard: "GMT+12"})
+    zoneList.Push({id: "Asia/Singapore", name: "Singapore, Kuala Lumpur", code: "GMT+8"})
+    zoneList.Push({id: "Asia/Tokyo", name: "Tokyo", code: "JST"})
+    zoneList.Push({id: "Asia/Kolkata", name: "India", code: "IST"})
+    zoneList.Push({id: "Europe/London", name: "London", code: "GMTBST", standard: "GMT"})
+    zoneList.Push({id: "Europe/Paris", name: "Paris, Berlin", code: "CET", standard: "GMT+1"})
+    zoneList.Push({id: "America/New_York", name: "New York", code: "EST", standard: "GMT-5"})
+    zoneList.Push({id: "America/Chicago", name: "Chicago", code: "CST", standard: "GMT-6"})
+    zoneList.Push({id: "America/Denver", name: "Denver", code: "MST", standard: "GMT-7"})
+    zoneList.Push({id: "America/Los_Angeles", name: "Los Angeles", code: "PST", standard: "GMT-8"})
+    zoneList.Push({id: "UTC", name: "UTC", code: "GMT"})
+    m.clockZones = zoneList
+    Return zoneList
+End Function
+
+Function ClockZone(value As Dynamic) As Dynamic
+    If not TextValue(value) Then Return invalid
+    For Each zone In ClockZones()
+        If zone.id = value Then Return zone
+    End For
+    Return invalid
+End Function
+
+Function ApplyTimeZone(clock As Dynamic, value As Dynamic) As Boolean
+    If clock = invalid Then Return false
+    zone = ClockZone(value)
+    If zone = invalid Then Return false
+    If UCase(clock.GetTimeZone()) = zone.code Then Return true
+    Return clock.SetTimeZone(zone.code)
+End Function
+
 Function ValidDisplaySchedule(schedule As Dynamic) As Boolean
     If Type(schedule) <> "roAssociativeArray" Then Return false
-    If not TextValue(schedule.timezone) Then Return false
-    If schedule.timezone <> "Australia/Sydney" Then Return false
+    If ClockZone(schedule.timezone) = invalid Then Return false
     If not TextValue(schedule.on) Or not TextValue(schedule.off) Then Return false
     onMinute = MinuteOfDay(schedule.on)
     offMinute = MinuteOfDay(schedule.off)
@@ -1531,14 +1613,67 @@ Function MinuteOfDay(value As String) As Integer
     Return hours * 60 + minutes
 End Function
 
-Function ScheduleAllows(clock As Dynamic, schedule As Object) As Boolean
-    If clock = invalid Then Return false
-    If not clock.IsValid() Then Return false
-    localTime = clock.GetZoneDateTime("AEST")
-    If localTime = invalid Then Return false
-    current = localTime.GetHour() * 60 + localTime.GetMinute()
-    Return current >= MinuteOfDay(schedule.on) And current < MinuteOfDay(schedule.off)
+Function ValidScheduleWeek(week As Dynamic) As Boolean
+    If Type(week) <> "roArray" Then Return false
+    If week.Count() <> 7 Then Return false
+    For Each day In week
+        If Type(day) <> "roAssociativeArray" Then Return false
+        If not BooleanValue(day.enabled) Or not TextValue(day.on) Or not TextValue(day.off) Then Return false
+        If MinuteOfDay(day.on) < 0 Or MinuteOfDay(day.off) <= MinuteOfDay(day.on) Then Return false
+    End For
+    Return true
 End Function
+
+Function ScheduleSample(clock As Dynamic, schedule As Object) As Dynamic
+    If clock = invalid Then Return invalid
+    If not clock.IsValid() Then Return invalid
+    zone = ClockZone(schedule.timezone)
+    If zone = invalid Then Return invalid
+    code = zone.code
+    If schedule.scheduledst = false And zone.standard <> invalid Then code = zone.standard
+    localTime = clock.GetZoneDateTime(code)
+    If localTime = invalid Then Return invalid
+    minute = localTime.GetHour() * 60 + localTime.GetMinute()
+    daySchedule = schedule
+    enabled = true
+    If schedule.scheduleweekly = true Then
+        ' 1 January 1970 was Thursday. The saved week starts on Monday.
+        index = ((localTime.ToSecondsSinceEpoch() \ 86400) + 3) Mod 7
+        daySchedule = schedule.week[index]
+        enabled = daySchedule.enabled
+    End If
+    wakeMinute = MinuteOfDay(daySchedule.on)
+    Return {day: Left(localTime.ToIsoString(), 8), minute: minute, uptime: UpTime(0), wakeMinute: wakeMinute,
+        wake: enabled And minute >= wakeMinute And minute < MinuteOfDay(daySchedule.off)}
+End Function
+
+Function DailyWakeCrossed(previous As Dynamic, current As Object, wakeMinute As Integer) As Boolean
+    If previous = invalid Or not current.wake Then Return false
+    If current.uptime - previous.uptime > 5 Then Return false
+    If previous.day = current.day Then Return previous.minute < wakeMinute
+    Return previous.minute >= 1438 And current.minute <= 1 And current.day > previous.day
+End Function
+
+Sub TickDisplaySchedule(panel As Object)
+    current = invalid
+    If panel.scheduled And panel.settings.scheduleenabled = true Then current = ScheduleSample(panel.clock, panel.settings)
+    previous = panel.wakeSample
+    panel.wakeSample = current
+    If current = invalid Then
+        ApplyScheduledPower(panel, invalid)
+        Return
+    End If
+    ApplyScheduledPower(panel, current.wake)
+    If not panel.settings.restartonwake Or not panel.autostart Or panel.waiting Or panel.settings.intent = "blackout" Then Return
+    If current.day = panel.settings.lastscheduledrestart Or not DailyWakeCrossed(previous, current, current.wakeMinute) Then Return
+    panel.settings.lastscheduledrestart = current.day
+    result = PanelCommand(panel, "restart", {})
+    If result = "" Then
+        LogEvent("DAILY_WAKE_CONTENT_RESTARTED", {day: current.day})
+    Else
+        LogEvent("DAILY_WAKE_CONTENT_RESTART_FAILED", {day: current.day, reason: result})
+    End If
+End Sub
 
 Sub ApplyScheduledPower(panel As Object, wake As Dynamic)
     If not BooleanValue(wake) Then

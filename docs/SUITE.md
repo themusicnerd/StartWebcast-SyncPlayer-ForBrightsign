@@ -2,7 +2,7 @@
 
 **Group Membership** on the leader lists the current roster. **Add Player** re-admits a provisioned follower. A new physical player needs its card identity and peer credentials before it appears in the selector.
 
-**Clock & Schedule** saves the Sydney wake and standby times. Playback and overlays continue while the schedule controls HDMI-CEC display power. Clear **Enable Display Schedule** and save to use manual display power. Followers use the leader’s display schedule in group mode.
+**Clock & Schedule** saves wake and standby times in the selected time zone. Playback and overlays continue while the schedule controls display power through the selected method. Clear **Enable Display Schedule** and save to use manual display power. Followers use the leader’s display schedule in group mode.
 
 The top bar shows HDMI-reported TV power. **Power On** and **Standby** send local HDMI-CEC commands to the connected display. **Snapshot** captures a 960 × 540 JPEG of the player’s video and graphics output. A snapshot can show content while a television is off, and HDMI adapters or displays can report power differently. [BrightSign HDMI and Screenshot API](https://docs.brightsign.biz/develop/rovideomode) · [BrightSign HDMI-CEC API](https://docs.brightsign.biz/develop/rocecinterface)
 
@@ -63,10 +63,16 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 - **Updates** shows the installed BrightSignOS version. Open the BrightSign updater, sign in to the Diagnostic Web Server, then select **Advanced** and **BrightSignOS Update**. [BrightSign DWS](https://docs.brightsign.biz/manage/diagnostic-web-server-dws)
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
 - **Request HDMI Genlock** is off by default and applies to the selected player in a group. Changing it restarts the player. **Requested · Lock Unverified** means the firmware accepted the request. **Request Rejected · PTP Still Enabled** means playback continues using native PTP. BrightSign documents lock-state readback on XC5 and XT5. [BrightSign video mode API](https://docs.brightsign.biz/develop/rovideomode#set-sync-domain)
-- **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily display wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
+- **Clock & Schedule** sets the time zone, updates the hardware clock and changes the daily display wake and standby times. Sydney is the default. Group followers use the leader’s display schedule and time zone. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
 
 Use the rotate button on a player preview to turn the preview clockwise by 90°. The group saves the angle by player, including when you rearrange the grid. A quarter-turn displays the preview in a 9:16 frame.
+
+### Weekly Display Schedule
+
+Save the time zone on the leader or standalone player. Select **Use Weekly Hours** for separate Monday to Sunday hours. Clear a day to keep its display in standby. Use **Observe Daylight Saving** to follow the selected zone’s seasonal clock changes. Clear it to keep standard time year-round. **Restart Content at Daily Wake** starts the presentation or active source from the beginning once at the scheduled wake. Followers display the leader’s settings and use its playback cue. The local time zone on a follower applies to its own console and IDENT.
+
+The schedule API accepts `scheduleweekly`, `scheduledst` and `restartonwake` as booleans. Send a `week` array with seven `{enabled, on, off}` objects. The order is Monday through Sunday. On any enabled day, standby must follow wake.
 
 ### Display Control
 
@@ -147,7 +153,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `DELETE /content/{id}/{revision}` | `{"confirm":true}`. Use `draft` to remove a draft or `all` to remove the full uploaded set. |
 | `DELETE /content/presentation`, `PUT /content/presentation` | Send `{"confirm":true}` to remove or restore the SD presentation entry. |
 
-`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
+`PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (local `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages), `timezone` (one of the IDs in `native.timezones`), and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 
 The Players panel compares native decoder reports from the same playback cycle. During playback, the console estimates the position difference using the time each report arrived at the leader. During pause, it compares the stopped positions directly. All consoles show the same group reports and each player's difference from the leader. Physical HDMI frame alignment requires an output measurement.
 

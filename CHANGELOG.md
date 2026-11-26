@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.25
+
+- Add a persistent time zone selector for the clock, display schedule and IDENT.
+- Add per-day wake and standby hours, an optional daily playback restart and a daylight-saving switch. Followers show the leader’s schedule as read-only.
+
 ## 0.2.24
 
 - Accept the Samsung Frame's string response ID during IP pairing.

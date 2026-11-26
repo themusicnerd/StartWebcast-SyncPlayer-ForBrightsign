@@ -2,8 +2,11 @@
 
 const $ = (selector) => document.querySelector(selector);
 const updateHeaders = { 'Content-Type': 'application/json', 'X-SyncPlayer-Request': 'control' };
-const dateFormat = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'long' });
-const inputFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+let clockZone = 'Australia/Sydney';
+let dateFormat = makeDateFormat();
+function makeDateFormat() {
+  return new Intl.DateTimeFormat('en-AU', { timeZone: clockZone, dateStyle: 'medium', timeStyle: 'long' });
+}
 const labels = { 'built-in': 'Presentation', 'built-in-local': 'Local Presentation Preview', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', rtsp: 'RTSP Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
 const states = { booting: 'Booting', idle: 'Idle', starting: 'Starting', playing: 'Playing', paused: 'Paused', stopped: 'Stopped', standby: 'Standby', ended: 'Ended', error: 'Error', blackout: 'Blackout', 'outside group': 'Outside Group', online: 'Online', offline: 'Offline', local: 'Local' };
 let dashboard;
@@ -272,6 +275,7 @@ function renderStatus() {
     document.title = `SyncPlayer | Player ${native.playerid}`;
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
     $('#firmware-version').textContent = `Installed Version ${native.firmware}`;
+    renderTimeZone(native);
     $('#ident').disabled = $('#test-pattern').disabled = native.state === 'booting';
     $('#ident').setAttribute('aria-pressed', String(native.identmode === 'details'));
     $('#test-pattern').setAttribute('aria-pressed', String(native.identmode === 'test-pattern'));
@@ -315,9 +319,7 @@ function renderStatus() {
     fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted, audioenabled: native.audioenabled !== false, cecremote: native.cecremote === true });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
-    fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
-    $('#schedule-help').textContent = native.role === 'follower' ? 'This Follower Uses the Leader’s Schedule During Group Playback.' :
-      'The Schedule Controls Display Power. Playback Continues in Standby.';
+    renderSchedule(native, dashboard.schedule);
     fill('#ntp-form', native);
     fill('#startup-form', { identonboot: native.identonboot !== false });
     fill('#colour-form', native.colour || {});
@@ -609,6 +611,35 @@ function form(selector, handler) {
   });
 }
 
+function setClockZone(zone) {
+  if (!zone || zone === clockZone) return;
+  clockZone = zone;
+  dateFormat = makeDateFormat();
+  fillClockInput();
+  showTime();
+}
+
+function renderTimeZone(native) {
+  const form = $('#timezone-form');
+  const options = native.timezones || [];
+  const select = form.elements.timezone;
+  select.disabled = form.querySelector('button').disabled = !options.length;
+  if (!form.dataset.dirty && options.length) {
+    if (select.options.length !== options.length) {
+      select.replaceChildren(...options.map(({ id, name }) => new Option(name, id)));
+    }
+    select.value = native.timezone;
+  }
+  setClockZone(native.timezone);
+}
+
+function fillClockInput() {
+  if (!sample) return;
+  const format = new Intl.DateTimeFormat('sv-SE', { timeZone: clockZone, year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  $('#local-clock').value = format.format(sample.utc + performance.now() - sample.at).replace(' ', 'T');
+}
+
 function showTime() {
   if (!sample) return;
   const time = new Date(sample.utc + performance.now() - sample.at);
@@ -621,7 +652,8 @@ async function clock(change) {
     const result = await api('clock', change ? 'PUT' : 'GET', change);
     if (!result.valid) { $('#current').textContent = 'Clock needs to be set'; return; }
     sample = { utc: Date.parse(result.utc), at: performance.now() };
-    $('#sydney').value = inputFormat.format(sample.utc).replace(' ', 'T');
+    setClockZone(result.timeZone);
+    fillClockInput();
     showTime();
     if (change) showMessage('Player clock updated.');
   } catch (error) { if (change) showMessage(error.message, true); }
@@ -914,7 +946,72 @@ form('#role-form', (fields, element) => {
   if (role !== 'standalone') settings.genlock = fields.genlock.checked;
   saveSettings(element, settings, 'Apply These Playback and PTP Settings? Changes Restart This Player.');
 });
-form('#schedule-form', (fields, element) => saveSettings(element, { on: fields.on.value, off: fields.off.value, scheduleenabled: fields.enabled.checked }));
+const scheduleDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const scheduleRows = scheduleDays.map((day) => {
+  const row = item('div', undefined, 'schedule-day');
+  const enabled = Object.assign(item('input'), { type: 'checkbox', checked: true });
+  const on = Object.assign(item('input'), { type: 'time', value: '07:00' });
+  const off = Object.assign(item('input'), { type: 'time', value: '21:00' });
+  for (const [field, name] of [[enabled, day], [on, 'Wake'], [off, 'Standby']]) {
+    const label = item('label', undefined, field === enabled ? 'check' : undefined);
+    if (field !== enabled) field.setAttribute('aria-label', `${day} ${name}`);
+    label.append(field === enabled ? field : document.createTextNode(name), field === enabled ? document.createTextNode(day) : field);
+    row.append(label);
+  }
+  $('#schedule-week').append(row);
+  return { enabled, on, off };
+});
+
+function showWeeklyHours(weekly) {
+  $('#schedule-week').hidden = !weekly;
+  $('#schedule-daily').hidden = weekly;
+  const fields = $('#schedule-form').elements;
+  fields.on.required = fields.off.required = !weekly;
+  for (const { on, off } of scheduleRows) on.required = off.required = weekly;
+}
+
+function renderSchedule(native, shared) {
+  const follower = native.role === 'follower';
+  const schedule = shared || (follower ? null : native);
+  const form = $('#schedule-form');
+  $('#schedule-fields').disabled = !schedule || follower;
+  if (!form.dataset.dirty && schedule) {
+    fill('#schedule-form', { on: schedule.on, off: schedule.off, enabled: schedule.scheduleenabled !== false,
+      scheduledst: schedule.scheduledst !== false, restartonwake: schedule.restartonwake === true,
+      scheduleweekly: schedule.scheduleweekly === true });
+    for (const [i, row] of scheduleRows.entries()) {
+      const saved = schedule.week?.[i];
+      row.enabled.checked = saved?.enabled !== false;
+      row.on.value = saved?.on || schedule.on || '07:00';
+      row.off.value = saved?.off || schedule.off || '21:00';
+    }
+  }
+  showWeeklyHours(form.elements.scheduleweekly.checked);
+  $('#schedule-help').textContent = follower ? schedule ? `Using the Leader’s Schedule · ${schedule.timezone || 'Australia/Sydney'}` :
+    'Waiting for the Leader’s Schedule.' : 'Playback Continues in Standby.';
+}
+
+$('#schedule-form').elements.scheduleweekly.addEventListener('change', (event) => {
+  if (event.target.checked && !dashboard?.schedule?.week?.length && !dashboard?.native?.week?.length) {
+    const { on, off } = $('#schedule-form').elements;
+    for (const row of scheduleRows) {
+      row.on.value = on.value;
+      row.off.value = off.value;
+    }
+  }
+  showWeeklyHours(event.target.checked);
+});
+form('#schedule-form', (fields, element) => {
+  const settings = { scheduleenabled: fields.enabled.checked, scheduledst: fields.scheduledst.checked,
+    restartonwake: fields.restartonwake.checked, scheduleweekly: fields.scheduleweekly.checked };
+  if (settings.scheduleweekly) {
+    settings.week = scheduleRows.map(({ enabled, on, off }) => ({ enabled: enabled.checked, on: on.value, off: off.value }));
+  } else {
+    settings.on = fields.on.value;
+    settings.off = fields.off.value;
+  }
+  return saveSettings(element, settings);
+});
 form('#member-form', (fields) => { if (fields.player.value) void changeMembership(fields.player.value, true); });
 form('#startup-form', (fields, element) => saveSettings(element, { identonboot: fields.identonboot.checked }));
 form('#ntp-form', (fields, element) => saveSettings(element, { ntp: fields.ntp.value.trim(), interval: Number(fields.interval.value) }));
@@ -938,7 +1035,8 @@ form('#slot-form', async (fields, element) => {
   await refresh();
 });
 $('#computer').addEventListener('click', () => clock({ utc: new Date().toISOString() }));
-form('#manual', () => clock({ sydney: $('#sydney').value }));
+form('#manual', () => clock({ local: $('#local-clock').value, timeZone: clockZone }));
+form('#timezone-form', (fields, element) => saveSettings(element, { timezone: fields.timezone.value }));
 
 let updateState;
 

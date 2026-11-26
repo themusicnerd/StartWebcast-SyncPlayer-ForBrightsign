@@ -88,20 +88,48 @@ Sub Main()
     Check(not ApplyStaticIPv4(network, profile) And network.sequence = "192.168.1.12/255.255.255.0", "failed setter prevents Apply")
 
     clock = {IsValid: FakeClockValid, GetZoneDateTime: FakeZonedTime, timeValid: true}
-    clock.localTime = {GetHour: FakeHour, GetMinute: FakeMinute, hour: 6, minute: 59}
-    Check(not ScheduleAllows(clock, schedule), "off at 06:59")
+    clock.localTime = {GetHour: FakeHour, GetMinute: FakeMinute, ToIsoString: FakeLocalIso,
+        ToSecondsSinceEpoch: FakeLocalEpoch, hour: 6, minute: 59, date: "20261127000000", epoch: StrToI("1795737600")}
+    beforeWake = ScheduleSample(clock, schedule)
+    Check(not beforeWake.wake, "off at 06:59")
     clock.localTime.hour = 7
     clock.localTime.minute = 0
-    Check(ScheduleAllows(clock, schedule) And clock.zone = "AEST", "wake at 07:00 Sydney")
+    atWake = ScheduleSample(clock, schedule)
+    Check(atWake.wake And clock.zone = "AEST", "wake at 07:00 Sydney")
+    Check(DailyWakeCrossed(beforeWake, atWake, 420), "daily wake crosses from standby")
+    Check(not DailyWakeCrossed(invalid, atWake, 420), "starting inside the wake window does not restart twice")
+    Check(not DailyWakeCrossed(atWake, atWake, 420), "daily wake is not repeated")
+    schedule.scheduledst = false
+    stdWake = ScheduleSample(clock, schedule)
+    Check(stdWake.wake And clock.zone = "AEST1", "Sydney schedule optionally uses standard time year-round")
+    schedule.scheduledst = true
+    schedule.timezone = "Australia/Brisbane"
+    brisbaneWake = ScheduleSample(clock, schedule)
+    Check(brisbaneWake.wake And clock.zone = "AEST1", "Brisbane uses the fixed eastern zone")
+    schedule.timezone = "Australia/Adelaide"
+    adelaideWake = ScheduleSample(clock, schedule)
+    Check(adelaideWake.wake And clock.zone = "ACST", "Adelaide uses the DST-aware central zone")
+    schedule.timezone = "Australia/Sydney"
+    schedule.scheduleweekly = true
+    schedule.week = []
+    For day = 0 To 6
+        schedule.week.Push({enabled: true, on: "07:00", off: "21:00"})
+    End For
+    Check(ValidScheduleWeek(schedule.week), "a complete Monday to Sunday schedule")
+    schedule.week[4] = {enabled: false, on: "09:00", off: "17:00"}
+    friday = ScheduleSample(clock, schedule)
+    Check(not friday.wake And friday.wakeMinute = 540, "Friday can be set to standby all day")
+    schedule.scheduleweekly = false
     clock.localTime.hour = 20
     clock.localTime.minute = 59
-    Check(ScheduleAllows(clock, schedule), "on at 20:59")
+    nearStandby = ScheduleSample(clock, schedule)
+    Check(nearStandby.wake, "on at 20:59")
     clock.localTime.hour = 21
     clock.localTime.minute = 0
-    Check(not ScheduleAllows(clock, schedule), "standby at 21:00")
+    atStandby = ScheduleSample(clock, schedule)
+    Check(not atStandby.wake, "standby at 21:00")
     clock.timeValid = false
-    clock.localTime.hour = 12
-    Check(not ScheduleAllows(clock, schedule), "invalid RTC stays out of the on window")
+    Check(ScheduleSample(clock, schedule) = invalid, "invalid RTC stays out of the on window")
 
     standbyVideo = {StopClear: FakeStopClear, cleared: false}
     display = {video: standbyVideo, cec: invalid, before: true, screens: true, state: "playing"}
@@ -305,6 +333,14 @@ End Function
 
 Function FakeMinute() As Integer
     Return m.minute
+End Function
+
+Function FakeLocalIso() As String
+    Return m.date
+End Function
+
+Function FakeLocalEpoch() As Integer
+    Return m.epoch
 End Function
 
 Function FakeStopClear() As Boolean

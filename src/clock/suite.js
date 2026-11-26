@@ -164,7 +164,7 @@ async function thermalSensors() {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'cecremote', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'genlock', 'identonboot', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'cecremote', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'scheduledst', 'restartonwake', 'scheduleweekly', 'week', 'timezone', 'leader', 'role', 'domain', 'group', 'genlock', 'identonboot', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
@@ -172,9 +172,18 @@ function sanitiseSettings(input, members, current, deviceId) {
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
   if ('audioenabled' in safe && typeof safe.audioenabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
   if ('cecremote' in safe && typeof safe.cecremote !== 'boolean') throw new RequestError(400, 'CEC Remote Playback Must Be True or False.');
+  if ('timezone' in safe && !current?.timezones?.some(({ id }) => id === safe.timezone)) {
+    throw new RequestError(400, 'Choose a Supported Time Zone.');
+  }
   if ('genlock' in safe && typeof safe.genlock !== 'boolean') throw new RequestError(400, 'HDMI Genlock Must Be True or False.');
   if ('identonboot' in safe && typeof safe.identonboot !== 'boolean') throw new RequestError(400, 'IDENT on Boot Must Be True or False.');
-  if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
+  const scheduleFlags = ['scheduleenabled', 'scheduledst', 'restartonwake', 'scheduleweekly'];
+  if (current?.role === 'follower' && keys.some((key) => [...scheduleFlags, 'on', 'off', 'week'].includes(key))) {
+    throw new RequestError(409, 'Change the Display Schedule on the Leader.');
+  }
+  for (const key of scheduleFlags) {
+    if (key in safe && typeof safe[key] !== 'boolean') throw new RequestError(400, 'Display Schedule Options Must Be True or False.');
+  }
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
   if ('presentationtitle' in safe && (typeof safe.presentationtitle !== 'string' || !safe.presentationtitle.trim() || safe.presentationtitle.length > 100 || /[\p{Cc}]/u.test(safe.presentationtitle))) {
     throw new RequestError(400, 'Enter a Presentation Title of 1 to 100 Characters.');
@@ -185,10 +194,17 @@ function sanitiseSettings(input, members, current, deviceId) {
   if ('interval' in safe && (!Number.isInteger(safe.interval) || (safe.interval !== 0 && (safe.interval < 120 || safe.interval > 86400)))) {
     throw new RequestError(400, 'Use 0 for the default interval or enter 120–86400 seconds.');
   }
+  const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if ('week' in safe) {
+    if (!Array.isArray(safe.week) || safe.week.length !== 7 || safe.week.some((day) => !day || typeof day.enabled !== 'boolean' ||
+        typeof day.on !== 'string' || typeof day.off !== 'string' || !validTime.test(day.on) || !validTime.test(day.off) || day.off <= day.on)) {
+      throw new RequestError(400, 'Enter Wake and Standby Times in Monday to Sunday Order. Standby Must Follow Wake.');
+    }
+    safe.week = safe.week.map(({ enabled, on, off }) => ({ enabled, on, off }));
+  }
   if ('on' in safe || 'off' in safe) {
     safe.on ??= current?.on;
     safe.off ??= current?.off;
-    const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
     if (!validTime.test(safe.on) || !validTime.test(safe.off) || safe.off <= safe.on) throw new RequestError(400, 'Enter a daily start time before the standby time.');
   }
   if ('leader' in safe && !members.includes(safe.leader)) throw new RequestError(400, 'Select a player in this group as leader.');
@@ -946,7 +962,11 @@ class Suite {
     });
     const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
       decoderTiming(reports, localPlayback);
-    return { native, players, displayControl: this.display.snapshot(), layout: this.layout(), presentation: this.cardPresentation(), recovery: this.streamRecovery(), storage: this.storage, problem: this.problem, ptp,
+    const schedule = native?.role === 'follower' ? leaderReport?.schedule || null : native ? {
+      timezone: native.timezone, on: native.on, off: native.off, scheduleenabled: native.scheduleenabled, scheduledst: native.scheduledst,
+      restartonwake: native.restartonwake, scheduleweekly: native.scheduleweekly, week: native.week,
+    } : null;
+    return { native, players, schedule, displayControl: this.display.snapshot(), layout: this.layout(), presentation: this.cardPresentation(), recovery: this.streamRecovery(), storage: this.storage, problem: this.problem, ptp,
       dispatch: this.library.state.dispatch, events: this.events, syncQuality: 'unknown', timing, outputModes, lighting: this.lighting.snapshot(), metrics: this.metrics };
   }
 
@@ -1299,7 +1319,7 @@ class Suite {
       let group;
       if (admitted) {
         const snapshot = this.snapshot();
-        group = { timing: snapshot.timing, layout: snapshot.layout, presentation: this.cardPresentation(), seekable: this.playbackStatus()?.groupSeekable === true,
+        group = { timing: snapshot.timing, layout: snapshot.layout, schedule: snapshot.schedule, presentation: this.cardPresentation(), seekable: this.playbackStatus()?.groupSeekable === true,
           players: snapshot.players.map(({ id, member, connection, status, thumbnail }) => ({
             id, member, thumbnail, connection: connection === 'local' ? 'online' : connection,
             status: status ? { role: String(status.role || '').slice(0, 12), output: String(status.output || '').slice(0, 24),

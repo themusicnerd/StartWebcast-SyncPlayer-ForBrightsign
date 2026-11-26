@@ -33,3 +33,12 @@ test('matches clock replies by protocol and request ID', async () => {
   receive({ ...sent, ok: 'yes' });
   assert.equal((await result).ok, 'yes');
 });
+
+test('converts local time across fractional offsets and northern daylight-saving rules', () => {
+  assert.equal(toUtc({ local: '2026-11-26T19:00' }, 'Australia/Adelaide').toISOString(), '2026-11-26T08:30:00.000Z');
+  assert.equal(toUtc({ local: '2026-11-26T19:00' }, 'Australia/Darwin').toISOString(), '2026-11-26T09:30:00.000Z');
+  assert.equal(toUtc({ local: '2026-11-26T19:00' }, 'Australia/Brisbane').toISOString(), '2026-11-26T09:00:00.000Z');
+  assert.equal(toUtc({ local: '2026-11-26T19:00' }, 'America/New_York').toISOString(), '2026-11-27T00:00:00.000Z');
+  assert.equal(toUtc({ local: '2026-11-01T01:30' }, 'America/New_York'), null);
+  assert.equal(toUtc({ local: '2026-03-08T02:30' }, 'America/New_York'), null);
+});

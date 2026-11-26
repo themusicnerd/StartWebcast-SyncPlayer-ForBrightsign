@@ -12,11 +12,7 @@ const { Updates, versionPattern } = require('./updates');
 
 const deriveKey = promisify(scrypt);
 const protocol = 'start-syncplayer-clock-v1';
-const timeZone = 'Australia/Sydney';
-const sydney = new Intl.DateTimeFormat('sv-SE', {
-  timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-});
+const defaultTimeZone = 'Australia/Sydney';
 
 function clockRequest(port, telemetry = () => {}, cec = () => {}) {
   let pending;
@@ -54,17 +50,29 @@ function clockRequest(port, telemetry = () => {}, cec = () => {}) {
   });
 }
 
-function toUtc(input) {
+function toUtc(input, timeZone = defaultTimeZone) {
   if (typeof input.utc === 'string' && /^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(input.utc)) {
     const instant = new Date(input.utc);
     if (Number.isFinite(+instant) && instant.toISOString() === input.utc) return instant;
   }
-  if (typeof input.sydney !== 'string' || !/^20\d\d-\d\d-\d\dT\d\d:\d\d$/.test(input.sydney)) return null;
-  const wallTime = `${input.sydney}:00`;
+  const local = input.local ?? input.sydney;
+  if (typeof local !== 'string' || !/^20\d\d-\d\d-\d\dT\d\d:\d\d$/.test(local)) return null;
+  const wallTime = `${local}:00`;
   const nominal = Date.parse(`${wallTime}Z`);
   if (!Number.isFinite(nominal)) return null;
-  const candidates = [10, 11].map((offset) => new Date(nominal - offset * 3600000));
-  const matches = candidates.filter((date) => sydney.format(date).replace(' ', 'T') === wallTime);
+  const formatter = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'sydney' in input ? defaultTimeZone : timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  const format = (instant) => formatter.format(instant).replace(' ', 'T');
+  const offsets = new Set();
+  // Sample both sides of a clock transition, including any half-hour offset.
+  for (const hours of [-36, -24, -12, 0, 12, 24, 36]) {
+    const instant = nominal + hours * 3600000;
+    offsets.add(Date.parse(`${format(instant)}Z`) - instant);
+  }
+  const candidates = [...offsets].map((offset) => new Date(nominal - offset));
+  const matches = candidates.filter((date) => format(date) === wallTime);
   return matches.length === 1 ? matches[0] : null;
 }
 
@@ -84,15 +92,19 @@ function json(response, status, value, extra) {
   send(response, status, 'application/json', JSON.stringify(value), extra);
 }
 
-async function readUpdate(request) {
+async function readUpdate(request, timeZone) {
   if (request.headers['content-type'] !== 'application/json') return null;
   const size = request.headers['content-length'] || '';
   if (!/^\d{1,3}$/.test(size) || Number(size) > 128) return null;
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (!input || typeof input !== 'object' || Object.keys(input).length !== 1) return null;
-  return toUtc(input);
+  if (!input || typeof input !== 'object') return null;
+  const keys = Object.keys(input);
+  if (keys.length === 2 && keys.includes('local') && keys.includes('timeZone')) {
+    if (!timeZone || input.timeZone !== timeZone) throw new RequestError(409, 'The Player’s Time Zone Changed. Refresh and Try Again.');
+  } else if (keys.length !== 1 || !['utc', 'sydney'].includes(keys[0])) return null;
+  return toUtc(input, timeZone);
 }
 
 function makeServer({ host, port, tls, credentials, requestClock, suite, updates }) {
@@ -178,8 +190,9 @@ function makeServer({ host, port, tls, credentials, requestClock, suite, updates
     if (request.method === 'PUT') {
       let instant;
       try {
-        instant = await readUpdate(request);
-      } catch {
+        instant = await readUpdate(request, suite?.status?.timezone);
+      } catch (error) {
+        if (error instanceof RequestError) throw error;
         return json(response, 400, { error: 'Enter a valid date and time.' });
       }
       if (!instant || instant.getUTCFullYear() < 2020 || instant.getUTCFullYear() >= 2038) {
@@ -193,7 +206,7 @@ function makeServer({ host, port, tls, credentials, requestClock, suite, updates
     if (result.ok !== 'yes') return json(response, 502, { error: 'The player rejected the clock request.' });
     const parts = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)(?:[.,](\d{3,6}))?$/.exec(result.utc || '');
     const iso = parts && `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}.${(parts[7] || '000').slice(0, 3)}Z`;
-    return json(response, 200, { timeZone, valid: result.valid === 'yes' && Boolean(iso), utc: iso });
+    return json(response, 200, { timeZone: result.timezone || result.timeZone || suite?.status?.timezone || defaultTimeZone, valid: result.valid === 'yes' && Boolean(iso), utc: iso });
   }
 
   const server = createServer({ ...tls, minVersion: 'TLSv1.2', maxHeaderSize: 4096 }, (request, response) => {

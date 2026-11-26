@@ -43,7 +43,7 @@ function showStartup(data) {
     ['Player Model', data.model], ['BrightSignOS', data.firmware], ['SyncPlayer Version', data.version],
     ['HDMI Output', data.output], ['Rotation', `${data.rotation}°`], ['HDMI Audio', data.audio ? 'On' : 'Off'],
     ['Volume', `${data.volume}%`], ['Mute', data.mute ? 'On' : 'Off'], ['Mode', role[data.role]],
-    ['PTP Domain', data.domain], ['Sync Group', data.group], ['Sydney Date and Time', data.utc ? undefined : 'Clock Unset'],
+    ['PTP Domain', data.domain], ['Sync Group', data.group], ['Local Date and Time', data.utc ? undefined : 'Clock Unset'],
     ['NTP Server', data.ntp?.replace(/^ntp:\/\//, '') || 'Off'], ['NTP Status', networkTime], ['Lighting Input', protocols[lighting.protocol] || 'Off'],
   ];
   if (protocols[lighting.protocol]) {
@@ -57,7 +57,7 @@ function showStartup(data) {
     const description = document.createElement('dd');
     title.textContent = label;
     description.textContent = value(text);
-    if (label === 'Sydney Date and Time') clock = description;
+    if (label === 'Local Date and Time') clock = description;
     row.append(title, description);
     diagnostics.append(row);
   }
@@ -67,7 +67,7 @@ function showStartup(data) {
     Date.parse(data.utc);
   if (Number.isFinite(utc)) {
     const start = performance.now();
-    const format = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', year: 'numeric', month: 'short', day: '2-digit', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
+    const format = new Intl.DateTimeFormat('en-AU', { timeZone: data.timezone || 'Australia/Sydney', year: 'numeric', month: 'short', day: '2-digit', hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
     const tick = () => { clock.textContent = format.format(utc + performance.now() - start); };
     tick();
     setInterval(tick, 1000);

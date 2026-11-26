@@ -127,3 +127,9 @@ Samsung's [Consumer IP Control Worksheet](https://image-us.samsung.com/SamsungUS
 A Frame LS03HE running 1242 returned HTTP 200, a string JSON-RPC response ID of "1", and the AccessToken field after the operator selected Allow. SyncPlayer now accepts both the numeric and string form of that specific request ID.
 
 The Sony Simple IP and AQUOS presets use the vendor's documented power commands. The Roku preset uses documented ECP PowerOff and HDMI-CEC wake. PJLink uses the standard class 1 POWR command with either no authentication or the legacy challenge-response. [Sony Simple IP](https://pro-bravia.sony.net/remote-display-control/simple-ip-control/) · [Roku ECP](https://developer.roku.com/dev/docs/external-control-api) · [Sharp AQUOS manual](https://files.sharpusa.com/Downloads/ForHome/HomeEntertainment/LCDTVs/Manuals/mon_man_LC70LE847U_LC60LE847U_LC70LE745U_LC60LE745U_LC80LE844U.pdf) · [PJLink specification](https://pjlink.jbmia.or.jp/english/data/5-1_PJLink_eng_20131210.pdf)
+
+### 0.2.25 Time Zone
+
+The selector uses BrightSign's documented `roSystemTime.SetTimeZone(zone_name As String) As Boolean` and `GetZoneDateTime(timezone_name As String) As Object`. The native mock checks Sydney, Brisbane and Adelaide schedule resolution. Node tests cover fractional offsets and DST gaps and repeats. [BrightSign system time API](https://docs.brightsign.biz/develop/rosystemtime)
+
+The weekly schedule tests validate Monday-to-Sunday order, disabled days, native standard-time selection and once-per-day wake crossing. The follower console reads the schedule from the authenticated leader heartbeat. [BrightSign date API](https://docs.brightsign.biz/develop/rodatetime)

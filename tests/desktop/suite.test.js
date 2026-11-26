@@ -196,3 +196,15 @@ test('accepts a display title for an imported presentation', () => {
     { presentationtitle: 'Example Presentation' });
   assert.throws(() => sanitiseSettings({ presentationtitle: 'Title\nSecond Line' }, ['A'], {}, 'A'), /Presentation Title/);
 });
+
+test('validates weekly hours and makes follower schedules leader-owned', () => {
+  const week = Array.from({ length: 7 }, (_, i) => ({ enabled: i < 5, on: '07:00', off: '21:00' }));
+  const timezones = [{ id: 'Australia/Sydney' }, { id: 'Australia/Adelaide' }];
+  const leader = { role: 'leader', leader: 'A', timezones };
+  const follower = { role: 'follower', leader: 'A', timezones };
+  const weekly = { scheduleweekly: true, scheduledst: false, restartonwake: true, week };
+  assert.deepEqual(sanitiseSettings(weekly, ['A', 'B'], leader, 'A'), weekly);
+  assert.throws(() => sanitiseSettings({ week: week.slice(0, 6) }, ['A', 'B'], leader, 'A'), /Monday to Sunday/);
+  assert.throws(() => sanitiseSettings(weekly, ['A', 'B'], follower, 'B'), /Schedule on the Leader/);
+  assert.deepEqual(sanitiseSettings({ timezone: 'Australia/Adelaide' }, ['A', 'B'], follower, 'B'), { timezone: 'Australia/Adelaide' });
+});
