@@ -11,6 +11,10 @@ For an HD setup, change `output_mode` to `1920x1080x50p` on all three cards. Edi
 
 If playback stays on the holding image, check the LAN addresses and which card went into each unit. When local diagnostics are available, look for `WRONG_PLAYER_CARD`, `LOCAL_CLIP_UNPLAYABLE`, `OUTPUT_MODE_REJECTED`, `NATIVE_READY` and `NATIVE_PLAY_REQUESTED`. Use the [hardware checklist](HARDWARE_TEST.md) to measure frame alignment and recovery.
 
+## Media verification
+
+For the prepared cards, FFmpeg fully decoded all three source movies, including their audio tracks, without errors. Each has 12,626 video frames at 25 fps over 505.04 seconds. Audio packet timing matched across the set. Each deployed movie matched the source bytes, and every card file passed its SHA-256 manifest check. BrightScript syntax and desktop call-path tests passed. HDMI output, loop gaps, holding display and synchronisation are pending a three-player hardware check.
+
 ## Preparing another set
 
 From the repository, run `python tools/prepare_sdcards.py SHARED_STEM --output path/to/empty/folder`. The builder reads the matching A, B and C MP4s and the HOLDING JPEG from `content`. It checks the 4K25 video and audio timelines, preserves each MP4 byte-for-byte, and makes a 1920 × 1080 playback copy of the holding image. Each build has a native group ID derived from its video hashes.
