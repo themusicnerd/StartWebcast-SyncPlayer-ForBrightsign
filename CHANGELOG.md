@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 · 26 November 2026
+
+- Prepare individual A/B/C cards from matching 4K25 HEVC and AAC MP4s, with byte-for-byte copy verification.
+- Add a holding JPEG behind the video plane, card-to-IP validation, 50 Hz output modes and leader-only HDMI audio.
+- Enable PTP commissioning on prepared cards and use native leader-rescheduled loops for the AAC presentation. Hardware acceptance remains pending.
+
 ## 0.1.0 · 26 November 2026
 
 - Added the standalone XD236 native sync bench app with automatic role assignment for 192.168.1.11–13.

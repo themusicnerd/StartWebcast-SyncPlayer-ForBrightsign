@@ -1,4 +1,4 @@
-# Start SyncPlayer 0.1.0 · XD236 bench
+# Start SyncPlayer · XD236 bench
 
 Use three spare FAT32 microSD cards and three XD236s on the same wired bench switch. Keep existing media cards for rollback. Use matching BrightSignOS and three displays that accept 1080p60. The documented reference build is **BrightSignOS 9.1.173**. Record the version actually installed on each player.
 

@@ -18,6 +18,19 @@ Sub Main()
     Check(not ValidConfig(config), "unknown leader")
     config.leader_id = "C"
     Check(ValidConfig(config), "alternative leader")
+    config.output_mode = "3840x2160x50p"
+    Check(not ValidConfig(config), "card output requires card identity")
+    config.card_player_id = "B"
+    Check(ValidConfig(config), "4K presentation card")
+    config.output_mode = "1920x1080x50p"
+    Check(ValidConfig(config), "HD presentation card")
+    config.card_player_id = "../B"
+    Check(not ValidConfig(config), "unsafe card identity")
+    config.card_player_id = "D"
+    Check(not ValidConfig(config), "card identity outside group")
+    config.card_player_id = "B"
+    config.output_mode = "auto"
+    Check(not ValidConfig(config), "automatic mode is unavailable for synced cards")
 
     video = {
         PlayFile: FakePlayFile

@@ -4,3 +4,5 @@ node_modules/
 build/
 releases/*.zip
 releases/*.sha256
+/content/
+/sdcard/

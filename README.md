@@ -1,6 +1,6 @@
 # Start SyncPlayer
 
-Start Webcast's native three-player XD236 sync proof of concept, version **0.1.0**. It boots from microSD, plays a distinct frame-counter clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Hardware acceptance is pending.
+Start Webcast's native three-player XD236 sync proof of concept, version **0.1.1**. It boots from microSD, plays a distinct frame-counter clip on each screen, and uses BrightSign's native video decoder and PTP/SyncManager timing. Hardware acceptance is pending.
 
 | Screen | Role | Primary Ethernet address |
 | --- | --- | --- |
@@ -11,6 +11,10 @@ Start Webcast's native three-player XD236 sync proof of concept, version **0.1.0
 ## Bench setup
 
 Use the same release ZIP on all three players. [SD quick start](docs/SD-QUICK-START.md) covers card layout, the wired PTP domain and first boot. [Hardware checklist](docs/HARDWARE_TEST.md) covers timing measurements, faults, evidence and rollback. The application starts automatically from card and uses the address already assigned to `eth0`.
+
+## Prepared content cards
+
+Use [the content card guide](docs/CONTENT-CARDS.md) to prepare or copy dedicated A/B/C cards that play a matched 4K25 set with a holding image. The card build preserves the MP4s, shows the holding image during startup and sends audio from the leader over HDMI.
 
 ## Build and verify
 
@@ -47,4 +51,4 @@ The source is `config/syncplayer.json`. To produce a different common SD build, 
 
 ## Scope
 
-The release covers the first task in the [product specification](PROJECT_SPEC.md). It has no CMS, browser commissioning, peer transfers or REST interface. The [implementation plan](docs/IMPLEMENTATION_PLAN.md) gates that work on native bench results. See the [architecture decision](docs/ADR-001-NATIVE-SYNC.md), [API verification](docs/API_VERIFICATION.md), [test report](docs/TEST_REPORT.md) and [changelog](CHANGELOG.md).
+The release covers the first task in the [product specification](PROJECT_SPEC.md). It has no CMS, browser commissioning, peer transfers or REST interface. The [implementation plan](docs/IMPLEMENTATION_PLAN.md) gates that work on native bench results. See the [architecture decision](docs/ADR-001-NATIVE-SYNC.md), [API verification](docs/API_VERIFICATION.md), [0.1.0 test report](docs/TEST_REPORT.md) and [changelog](CHANGELOG.md).

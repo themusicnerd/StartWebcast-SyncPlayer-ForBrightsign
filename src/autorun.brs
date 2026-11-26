@@ -2,14 +2,15 @@ Sub Main()
     m.systemLog = CreateObject("roSystemLog")
     m.playerId = ""
     port = CreateObject("roMessagePort")
-    RunBench(port)
-    ' A boot or playback fault leaves the player idle for diagnosis.
+    m.holding = invalid
+    RunPlayback(port)
+    ' Leave the display idle for diagnosis after a boot or playback fault.
     While true
         Wait(0, port)
     End While
 End Sub
 
-Sub RunBench(port As Object)
+Sub RunPlayback(port As Object)
     device = CreateObject("roDeviceInfo")
     If device = invalid Then
         LogEvent("DEVICE_INFO_UNAVAILABLE", {})
@@ -29,6 +30,14 @@ Sub RunBench(port As Object)
         Return
     End If
 
+    mode = CreateObject("roVideoMode")
+    If mode = invalid Then
+        LogEvent("VIDEO_MODE_UNAVAILABLE", {})
+        Return
+    End If
+    cardId = config.card_player_id
+    If cardId <> invalid Then m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
+
     network = CreateObject("roNetworkConfiguration", "eth0")
     If network = invalid Then
         LogEvent("NETWORK_INTERFACE_UNAVAILABLE", {interface_name: "eth0"})
@@ -39,12 +48,23 @@ Sub RunBench(port As Object)
 
     m.playerId = config.players[address]
     leader = (m.playerId = config.leader_id)
-    mediaPath = root + "media/FrameCounter_" + m.playerId + ".mp4"
+    targetMode = "1920x1080x60p"
+    mediaName = "FrameCounter_" + m.playerId + ".mp4"
+    contentId = "counter-r1"
+    If cardId <> invalid Then
+        If cardId <> m.playerId Then
+            LogEvent("WRONG_PLAYER_CARD", {card_id: cardId, ip: address})
+            Return
+        End If
+        targetMode = config.output_mode
+        mediaName = "Presentation_" + m.playerId + ".mp4"
+        contentId = "presentation-r1"
+    End If
+    mediaPath = root + "media/" + mediaName
     LogEvent("ROLE_ASSIGNED", {ip: address, leader: leader, group: config.group_id, loop_mode: config.loop_mode})
 
     video = CreateObject("roVideoPlayer")
-    mode = CreateObject("roVideoMode")
-    If video = invalid Or mode = invalid Then
+    If video = invalid Then
         LogEvent("NATIVE_VIDEO_UNAVAILABLE", {})
         Return
     End If
@@ -59,7 +79,6 @@ Sub RunBench(port As Object)
     End If
 
     If not EnsurePtp(config) Then Return
-    targetMode = "1920x1080x60p"
     previousMode = mode.GetMode()
     If previousMode <> targetMode Then
         LogEvent("SET_OUTPUT_MODE", {previous: previousMode, requested: targetMode})
@@ -73,6 +92,15 @@ Sub RunBench(port As Object)
     If mode.GetMode() <> targetMode Then
         LogEvent("OUTPUT_MODE_MISMATCH", {actual: mode.GetMode(), requested: targetMode})
         Return
+    End If
+
+    If cardId <> invalid Then
+        ' The first image was drawn in the boot-time graphics plane.
+        If previousMode <> targetMode Then
+            m.holding = invalid
+            m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
+        End If
+        If not ConfigureCardAudio(video, leader) Then Return
     End If
 
     manager = CreateObject("roSyncManager", {Domain: config.group_id})
@@ -100,7 +128,7 @@ Sub RunBench(port As Object)
     End If
     video.SetPort(port)
 
-    syncPrefix = "counter-r1-" + config.loop_mode + "-"
+    syncPrefix = contentId + "-" + config.loop_mode + "-"
     sequence = 1
     lastTimestamp = ""
     lastId = ""
@@ -171,7 +199,44 @@ Function ValidConfig(config As Dynamic) As Boolean
     End For
     If Len(config.leader_id) <> 1 Then Return false
     If Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.leader_id) = 0 Then Return false
-    Return ids.DoesExist(config.leader_id)
+    If not ids.DoesExist(config.leader_id) Then Return false
+    If config.card_player_id = invalid Then Return config.output_mode = invalid
+    If not TextValue(config.card_player_id) Or not TextValue(config.output_mode) Then Return false
+    If Len(config.card_player_id) <> 1 Or Instr(1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", config.card_player_id) = 0 Then Return false
+    If not ids.DoesExist(config.card_player_id) Then Return false
+    Return config.output_mode = "3840x2160x50p" Or config.output_mode = "1920x1080x50p"
+End Function
+
+Function ShowHolding(mode As Object, path As String) As Dynamic
+    ' Keep the graphics below the hardware video. It remains visible whenever the video plane is clear.
+    If not mode.SetGraphicsZOrder("back") Then
+        LogEvent("HOLDING_GRAPHICS_ORDER_REJECTED", {})
+        Return invalid
+    End If
+    bounds = CreateObject("roRectangle", 0, 0, mode.GetResX(), mode.GetResY())
+    holding = CreateObject("roImageWidget", bounds)
+    If holding = invalid Then
+        LogEvent("HOLDING_WIDGET_UNAVAILABLE", {})
+        Return invalid
+    End If
+    If not holding.SetDefaultMode(1) Or not holding.DisplayFile(path) Or not holding.Show() Then
+        LogEvent("HOLDING_IMAGE_REJECTED", {path: path})
+        Return invalid
+    End If
+    Return holding
+End Function
+
+Function ConfigureCardAudio(video As Object, leader As Boolean) As Boolean
+    If leader Then
+        audio = CreateObject("roAudioOutput", "hdmi")
+        If audio <> invalid Then
+            If video.SetPcmAudioOutputs(audio) Then Return true
+        End If
+    Else
+        If video.SetVolume(0) Then Return true
+    End If
+    LogEvent("AUDIO_CONFIGURATION_REJECTED", {leader: leader})
+    Return false
 End Function
 
 Function WholeNumber(value As Dynamic) As Boolean
@@ -290,7 +355,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.1.0"
+    fields.version = "0.1.1"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)
