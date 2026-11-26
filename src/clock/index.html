@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>StartWebcast SyncPlayer</title>
-  <link rel="icon" type="image/png" href="/startwebcast.png">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/clock.css">
   <script src="/clock.js" defer></script>
 </head>
@@ -46,18 +46,34 @@
       </section>
       <section class="panel section" id="sources" aria-labelledby="sources-title">
         <div class="panel-heading"><h2 id="sources-title">Sources &amp; Layers</h2></div>
-        <div class="layout" aria-label="Output Layout Diagram"><div id="layout-rect"></div><span id="layout-label">Lower layer</span></div>
-        <form id="source-form" class="stack">
-          <h3>Lower Layer</h3><p>Play the built-in presentation or a library clip, or load a live source on this player.</p>
-          <div class="form-row"><label>Source<select name="type"><option value="srt">SRT Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" placeholder="srt://encoder:9000?mode=caller" required></label><button type="submit">Play Source</button></div>
-        </form>
-        <form id="window-form" class="stack">
-          <h3>Lower-Layer Window</h3><div class="form-row dimensions"><label>Left %<input type="number" name="x" min="0" max="95" required></label><label>Top %<input type="number" name="y" min="0" max="95" required></label><label>Width %<input type="number" name="width" min="5" max="100" required></label><label>Height %<input type="number" name="height" min="5" max="100" required></label><button type="submit" class="secondary">Apply Window</button></div>
-        </form>
-        <form id="overlay-form" class="stack">
-          <div class="panel-heading"><h3>Upper Layer · HTML5 Overlay</h3><span class="muted" id="overlay-state">Off</span></div>
-          <div class="form-row"><label class="grow">Overlay URL<input type="url" name="url" spellcheck="false" placeholder="https://server/overlay.html"></label><button type="submit" class="secondary">Apply Overlay</button><button id="clear-overlay" class="secondary" type="button">Clear</button></div>
-        </form>
+        <figure class="layer-preview">
+          <figcaption>Display Layout</figcaption>
+          <div class="layout" aria-label="Lower-Layer Window and Full-Screen Upper Overlay"><div id="layout-rect"></div><div id="layout-overlay" hidden></div></div>
+          <ul class="layer-key"><li class="base-key">Lower-Layer Window</li><li class="overlay-key" id="overlay-key" hidden>Full-Screen HTML5 Overlay</li></ul>
+        </figure>
+        <div class="layer-controls">
+          <section class="layer-control base-layer" aria-labelledby="base-layer-title">
+            <div class="layer-heading"><h3 id="base-layer-title">Lower Layer <span>Base Source</span></h3><span id="base-state" class="status-pill">Reading Source</span></div>
+            <p id="base-source-name" class="muted"></p>
+            <p>Play one source in this layer. Choose the card presentation, an MP4, an SRT feed, or a webpage.</p>
+            <div class="actions layer-actions"><button id="source-built-in" type="button" class="secondary">Play Built-In</button><a href="#library">Choose MP4 in Media Library</a></div>
+            <form id="source-form" class="stack">
+              <h4>Live or Web Source</h4>
+              <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" aria-describedby="source-help" required></label><button type="submit">Play Source</button></div>
+              <p id="source-help" class="muted"></p>
+            </form>
+            <form id="window-form" class="stack">
+              <h4>Position and Size</h4><div class="form-row dimensions"><label>Left %<input type="number" name="x" min="0" max="95" required></label><label>Top %<input type="number" name="y" min="0" max="95" required></label><label>Width %<input type="number" name="width" min="5" max="100" required></label><label>Height %<input type="number" name="height" min="5" max="100" required></label><button type="submit" class="secondary">Apply Window</button></div>
+            </form>
+          </section>
+          <section class="layer-control upper-layer" aria-labelledby="upper-layer-title">
+            <div class="layer-heading"><h3 id="upper-layer-title">Upper Layer <span>HTML5 Overlay</span></h3><span class="status-pill" id="overlay-state">Off</span></div>
+            <p>Place an HTML5 page above the base source. Use a transparent page background to show the base source through it.</p>
+            <form id="overlay-form" class="stack">
+              <div class="form-row"><label class="grow">Overlay URL<input type="url" name="url" spellcheck="false" placeholder="https://server/overlay.html"></label><button type="submit" class="secondary">Apply Overlay</button><button id="clear-overlay" class="secondary" type="button">Clear Overlay</button></div>
+            </form>
+          </section>
+        </div>
       </section>
     </div>
 
@@ -141,10 +157,13 @@
           </ol><p>A resolution or rotation change restarts the player. All players can play audio. Select the audio players in Group Membership.</p></details>
           <details><summary>Set Sources, Layers and Lighting</summary><ol>
             <li>Open <a href="#sources">Sources &amp; Layers</a>.</li>
+            <li>Read the current source under <strong>Lower Layer</strong>.</li>
+            <li>Select <strong>Play Built-In</strong> or choose an MP4 from <strong>Media Library</strong>.</li>
             <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
             <li>Enter the URL. Select <strong>Play Source</strong>.</li>
             <li>Set the window position and size. Select <strong>Apply Window</strong>.</li>
-            <li>Enter the HTML5 overlay URL. Select <strong>Apply Overlay</strong>.</li>
+            <li>In <strong>Upper Layer</strong>, enter the HTML5 overlay URL.</li>
+            <li>Select <strong>Apply Overlay</strong>.</li>
             <li>Open <a href="#lighting">Lighting</a> to set the Art-Net or sACN input.</li>
           </ol></details>
           <details><summary>Install an App Update</summary><ol>

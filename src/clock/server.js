@@ -100,6 +100,10 @@ function makeServer({ host, port, tls, credentials, requestClock, suite, updates
     ['/clock.css', ['text/css; charset=utf-8', 'clock.css']],
     ['/startwebcast.png', ['image/png', 'startwebcast.png']],
   ].map(([url, [type, file]]) => [url, [type, readFileSync(join(__dirname, file))]]));
+  const logo = assets.get('/startwebcast.png')[1].toString('base64');
+  // The favicon viewport shows the hexagon at the top of the bundled logo.
+  assets.set('/favicon.svg', ['image/svg+xml; charset=utf-8',
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="38 -2 65 65" overflow="hidden"><image width="141" height="100" href="data:image/png;base64,${logo}"/></svg>`]);
   const { username, salt, digest } = credentials;
   if (typeof username !== 'string' || !/^[A-Za-z0-9_.-]{1,40}$/.test(username) ||
       typeof salt !== 'string' || !/^[a-f0-9]{32}$/.test(salt) ||

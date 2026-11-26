@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.11
+
+- Show only the StartWebcast hexagon in the browser tab icon.
+- Separate lower-layer playback, window sizing and upper-layer HTML5 overlay controls. Show the active source and the overlay state next to their controls.
+- Retry a rejected native MP4 loop using a new native sync timestamp on the leader.
+
 ## 0.2.10
 
 - Enable HDMI audio on every player by default. Select any combination of active players in Group Membership, or set HDMI Audio on each player.

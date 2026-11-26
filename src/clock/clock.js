@@ -101,6 +101,10 @@ function renderPlayback(current) {
   $('#playback-state').dataset.state = current.state;
   $('#playback-error').textContent = current.error || dashboard?.problem || '';
   $('#source-name').textContent = current.name;
+  const source = labels[current.source] || 'Source';
+  $('#base-state').textContent = states[current.state] || 'Unknown';
+  $('#base-state').dataset.state = current.state;
+  $('#base-source-name').textContent = ['built-in', 'built-in-local'].includes(current.source) || !current.name || current.name === source ? source : `${source} · ${current.name}`;
   $('#pause').textContent = current.state === 'paused' ? 'Resume' : 'Pause';
   $('#pause').disabled = !current.pausable;
   const slider = $('#position');
@@ -196,8 +200,12 @@ function renderStatus() {
     const power = { on: 'TV On', off: 'TV Off', unknown: 'TV Unknown' };
     $('#tv-power').textContent = power[native.tvpower] || power.unknown;
     $('#tv-power').dataset.state = native.tvpower || 'unknown';
-    $('#layout-label').textContent = `${labels[native.source] || 'Lower Layer'}${native.overlay ? ' + HTML5 overlay' : ''}`;
-    $('#overlay-state').textContent = native.overlaystate;
+    const overlayStates = { loading: 'Loading', loaded: 'Loaded', error: 'Load Error', 'graphics-order-error': 'Graphics Order Error' };
+    $('#overlay-state').textContent = !native.overlay ? 'Off' : native.state === 'blackout' ? 'Hidden' : overlayStates[native.overlaystate] || 'Configured';
+    $('#overlay-state').dataset.state = ['error', 'graphics-order-error'].includes(native.overlaystate) ? 'error' : '';
+    $('#layout-overlay').hidden = $('#overlay-key').hidden = !native.overlay || native.state === 'blackout';
+    $('#clear-overlay').disabled = !native.overlay;
+    $('#source-built-in').disabled = native.role === 'follower';
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
@@ -438,6 +446,15 @@ $('#source-form').elements.type.addEventListener('change', (event) => {
   $('#source-form').elements.url.placeholder = event.target.value === 'srt' ? 'srt://encoder:9000?mode=caller' : 'https://server/page.html';
 });
 form('#source-form', (fields) => command('source', { type: fields.type.value, url: fields.url.value.trim() }));
+const sourceFields = $('#source-form').elements;
+function showSourceInput() {
+  const srt = sourceFields.type.value === 'srt';
+  sourceFields.url.placeholder = srt ? 'srt://encoder:9000?mode=caller' : 'https://server/page.html';
+  $('#source-help').textContent = srt ? 'Use an SRT caller or listener URL.' : 'Enter the HTTP or HTTPS URL for the base webpage.';
+}
+sourceFields.type.addEventListener('change', showSourceInput);
+showSourceInput();
+$('#source-built-in').addEventListener('click', () => command('play', { id: 'presentation' }));
 form('#window-form', (fields, element) => saveSettings(element, { rect: Object.fromEntries(['x', 'y', 'width', 'height'].map((key) => [key, Number(fields[key].value)])) }));
 form('#overlay-form', (fields, element) => saveSettings(element, { overlay: fields.url.value.trim() }));
 $('#clear-overlay').addEventListener('click', () => {

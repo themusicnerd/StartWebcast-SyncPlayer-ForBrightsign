@@ -116,6 +116,14 @@ Sub Main()
     ConfigureDefaultNtp(timePanel)
     Check(timePanel.settings.ntp = "", "keep operator-disabled NTP")
 
+    recovery = {role: "leader", source: "built-in", settings: {intent: "auto", loop: true}}
+    Check(CanRetryVideo(recovery), "retry transient failures in continuing native playback")
+    recovery.settings.intent = "stop"
+    Check(not CanRetryVideo(recovery), "preserve explicit stop during recovery")
+    recovery.settings.intent = "auto"
+    recovery.role = "follower"
+    Check(not CanRetryVideo(recovery), "follower does not create a private restart")
+
     video = {
         PlayFile: FakePlayFile
         accept: true

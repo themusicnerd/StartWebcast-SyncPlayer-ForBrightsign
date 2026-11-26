@@ -272,6 +272,8 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel.memberUntil = 0
     panel.telemetryAt = 0
     panel.cecRequest = ""
+    panel.retryAt = 0
+    panel.retryDelay = 3
     Return panel
 End Function
 
@@ -452,6 +454,7 @@ Sub PanelSignal(panel As Object, prefix As String)
 End Sub
 
 Sub StopPanel(panel As Object, blackout As Boolean)
+    panel.retryAt = 0
     panel.video.StopClear()
     If panel.base <> invalid Then panel.base.Hide()
     panel.base = invalid
@@ -576,6 +579,7 @@ End Sub
 
 Function StartPanel(panel As Object) As Boolean
     If not panel.ready Then Return false
+    panel.retryAt = 0
     If panel.base <> invalid Then panel.base.Hide()
     panel.base = invalid
     panel.htmlPort = invalid
@@ -606,11 +610,22 @@ Function StartPanel(panel As Object) As Boolean
         panel.state = "error"
         panel.error = "The native renderer rejected this source."
         If panel.source = "srt" Then panel.error = "The native SRT source was rejected. Check the player SRT extension and the feed URL."
+        ScheduleVideoRetry(panel)
         Return false
     End If
     If panel.source <> "web" Then RefreshOverlay(panel)
     Return true
 End Function
+
+Function CanRetryVideo(panel As Object) As Boolean
+    Return panel.role <> "follower" And panel.settings.intent = "auto" And panel.settings.loop And panel.source <> "web" And panel.source <> "srt"
+End Function
+
+Sub ScheduleVideoRetry(panel As Object)
+    If not CanRetryVideo(panel) Then Return
+    panel.retryAt = UpTime(0) + panel.retryDelay
+    If panel.retryDelay < 24 Then panel.retryDelay = panel.retryDelay * 2
+End Sub
 
 Sub PanelTick(panel As Object)
     CheckUpdateBoot()
@@ -624,8 +639,17 @@ Sub PanelTick(panel As Object)
     If panel.state = "starting" And panel.loadAt > 0 And UpTime(0) > panel.loadAt + 20 Then
         panel.state = "error"
         panel.error = "The source did not report playback within 20 seconds."
+        ScheduleVideoRetry(panel)
     End If
     If panel.role = "follower" Or UpTime(0) < panel.readyAt Then Return
+    If panel.retryAt > 0 And now >= panel.retryAt Then
+        panel.retryAt = 0
+        If CanRetryVideo(panel) Then
+            LogEvent("NATIVE_VIDEO_RETRY", {source: panel.source})
+            panel.video.StopClear()
+            StartPanel(panel)
+        End If
+    End If
     wake = invalid
     If panel.scheduled And panel.settings.scheduleenabled = true And panel.clock <> invalid Then
         If panel.clock.IsValid() Then wake = ScheduleAllows(panel.clock, panel.settings)
@@ -704,7 +728,10 @@ End Sub
 Sub PanelVideoEvent(panel As Object, code As Integer)
     LogEvent("NATIVE_VIDEO_EVENT", {code: code})
     If panel.source = "web" Then Return
-    If code = 3 And panel.state = "starting" Then panel.state = "playing"
+    If code = 3 And panel.state = "starting" Then
+        panel.state = "playing"
+        panel.retryDelay = 3
+    End If
     If code <> 8 Or (panel.state <> "playing" And panel.state <> "starting") Then Return
     If panel.source = "srt" Then
         panel.state = "ended"
@@ -960,6 +987,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
     End If
     panel.settings.intent = "auto"
     panel.autostart = true
+    panel.retryDelay = 3
     If not StartPanel(panel) Then Return panel.error
     If (action = "play" And body.type <> "preview" And body.type <> "built-in-local") Or action = "restart" Then
         If not SavePanel(panel, panel.settings) Then Return "Playback started but the selection could not be saved."

@@ -31,7 +31,9 @@ Use **Group membership** on the leader to add or remove a provisioned follower. 
 
 ## Lower and upper layers
 
-The lower slot displays one source at a time. Choose an MP4 in Playback or the media library, or use **Sources & layers** to request an SRT feed or an `http://` or `https://` webpage. Live sources run locally with their own timing. The lower window uses whole-number percentages of the output. The HTML5 overlay covers the display above it and applies to the current session. Design overlays with transparent regions. A lower webpage combined with an overlay uses two stacked frames in one Chromium widget, so both webpages must allow framing. Web content runs with standard browser security and without hardware or Node privileges.
+The **Lower Layer** displays one base source. Select **Play Built-In**, choose an MP4 in **Media Library**, or enter an SRT or webpage URL in **Live or Web Source**. Use **Position and Size** to set the lower-layer window as percentages of the display. Live sources run locally with their own timing.
+
+The **Upper Layer** displays a full-screen HTML5 overlay above the lower layer for the current session. Use a transparent page background to show the lower layer through the overlay. **Display Layout** shows the lower-layer window and the overlay outline. A lower webpage and an overlay share one Chromium widget. Both webpages must allow framing. Web content uses standard browser security and has no hardware or Node privileges.
 
 For SRT, use `srt://encoder:port?mode=caller` from a compatible encoder in listener mode, or `srt://0.0.0.0:port?mode=listener` when the encoder initiates the connection. The native SRT source depends on the installed BrightSignOS build or SRT extension. Read the Playback status for a reported start or timeout. Test the actual feed and provider profile before use. [BrightSign SRT support](https://support.brightsign.biz/hc/en-us/community/posts/360038334993-SRT-Secure-Reliable-Transport)
 
