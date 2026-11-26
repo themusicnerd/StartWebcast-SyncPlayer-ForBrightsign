@@ -96,6 +96,12 @@ Sub Main()
     ApplyScheduledPower(display, invalid)
     Check(display.before = invalid And display.state = "playing", "disabled schedule leaves playback running")
 
+    Check(ValidRotation(0) And ValidRotation(90) And ValidRotation(180) And ValidRotation(270), "four HDMI rotations")
+    Check(not ValidRotation(45) And not ValidRotation("90"), "reject unsupported rotations")
+    Check(VideoRotation(90) = "rot270" And GraphicsRotation(90) = "rot90", "match clockwise rotation across native and graphics planes")
+    rotated = RotatedBounds({x: 10, y: 20, width: 25, height: 30}, 90)
+    Check(rotated.x = 50 And rotated.y = 10 And rotated.width = 30 And rotated.height = 25, "rotate a non-fullscreen rectangle")
+
     video = {
         PlayFile: FakePlayFile
         accept: true

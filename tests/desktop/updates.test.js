@@ -53,3 +53,9 @@ test('GitHub source is limited to a repository and branch, and display schedules
   assert.deepEqual(sanitiseSettings({ scheduleenabled: false }, ['A'], {}, 'A'), { scheduleenabled: false });
   assert.throws(() => sanitiseSettings({ scheduleenabled: 'false' }, ['A'], {}, 'A'), { status: 400 });
 });
+
+test('only accepts supported HDMI output rotations', () => {
+  assert.deepEqual(sanitiseSettings({ rotation: 270 }, ['A'], {}, 'A'), { rotation: 270 });
+  assert.throws(() => sanitiseSettings({ rotation: 45 }, ['A'], {}, 'A'), { status: 400 });
+  assert.throws(() => sanitiseSettings({ rotation: '90' }, ['A'], {}, 'A'), { status: 400 });
+});

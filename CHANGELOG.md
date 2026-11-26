@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.9
+
+- Add per-player Output Rotation next to Output Resolution. Rotate the native video, web layers and holding image by the same angle.
+
 ## 0.2.8
 
 - Use the bundled StartWebcast mark as the browser tab icon.

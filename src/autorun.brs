@@ -108,6 +108,13 @@ Sub RunPlayback(port As Object)
         Return
     End If
     panel.video = video
+    If panel.settings.rotation <> 0 Then
+        If not video.SetTransform(VideoRotation(panel.settings.rotation)) Then
+            LogEvent("OUTPUT_ROTATION_REJECTED", {rotation: panel.settings.rotation})
+            panel.settings.rotation = 0
+            SavePanel(panel, panel.settings)
+        End If
+    End If
     playable = video.GetFilePlayability(mediaPath)
     If playable = invalid Then
         LogEvent("LOCAL_CLIP_PROBE_FAILED", {path: mediaPath})
@@ -139,9 +146,10 @@ Sub RunPlayback(port As Object)
 
     If cardId <> invalid Then
         ' The first image was drawn in the boot-time graphics plane.
-        If previousMode <> targetMode Then
+        If previousMode <> targetMode Or panel.settings.rotation <> 0 Then
+            If m.holding <> invalid Then m.holding.Hide()
             m.holding = invalid
-            m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg")
+            m.holding = ShowHolding(mode, root + "media/HOLDING.jpeg", panel.settings.rotation)
         End If
         If not ConfigureCardAudio(video, panel.role <> "follower") Then Return
         ApplyVolume(panel, panel.settings)
@@ -232,7 +240,7 @@ Sub HandleClockWeb(event As Dynamic)
 End Sub
 
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
-    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, volume: 100, muted: false, rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
     If m.playerId = config.leader_id Then settings.role = "leader"
     scheduled = config.display_schedule <> invalid
     If scheduled Then
@@ -250,6 +258,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
             End For
         End If
     End If
+    If not ValidRotation(settings.rotation) Then settings.rotation = 0
     config.group_id = settings.group
     config.ptp_domain = settings.domain
     config.leader_id = settings.leader
@@ -278,6 +287,7 @@ Function PanelStatus(panel As Object) As Object
     data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: m.version}
     data.colour = panel.colour
     data.scheduleenabled = panel.settings.scheduleenabled
+    data.rotation = panel.settings.rotation
     If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
     data.cecrequest = panel.cecRequest
@@ -345,7 +355,33 @@ Function PanelTransport(panel As Object, action As String, stamp As String) As S
     Return ""
 End Function
 
+Function ValidRotation(angle As Dynamic) As Boolean
+    If not WholeNumber(angle) Then Return false
+    Return angle = 0 Or angle = 90 Or angle = 180 Or angle = 270
+End Function
+
+Function GraphicsRotation(angle As Integer) As String
+    If angle = 0 Then Return "identity"
+    Return "rot" + Mid(StrI(angle), 2)
+End Function
+
+Function VideoRotation(angle As Integer) As String
+    Return GraphicsRotation((360 - angle) Mod 360)
+End Function
+
+Function RotatedBounds(bounds As Object, angle As Integer) As Object
+    x = bounds.x
+    y = bounds.y
+    width = bounds.width
+    height = bounds.height
+    If angle = 90 Then Return {x: 100 - y - height, y: x, width: height, height: width}
+    If angle = 180 Then Return {x: 100 - x - width, y: 100 - y - height, width: width, height: height}
+    If angle = 270 Then Return {x: y, y: 100 - x - width, width: height, height: width}
+    Return bounds
+End Function
+
 Function PanelBounds(panel As Object, bounds As Object) As Object
+    bounds = RotatedBounds(bounds, panel.settings.rotation)
     width = panel.mode.GetResX()
     height = panel.mode.GetResY()
     Return CreateObject("roRectangle", Int(width * bounds.x / 100), Int(height * bounds.y / 100), Int(width * bounds.width / 100), Int(height * bounds.height / 100))
@@ -423,8 +459,9 @@ Function PanelWebUrl(value As Dynamic) As Boolean
     Return Len(value) <= 1024 And (Left(value, 7) = "http://" Or Left(value, 8) = "https://")
 End Function
 
-Function HtmlLayer(url As String, bounds As Object, port As Object) As Dynamic
+Function HtmlLayer(url As String, bounds As Object, port As Object, rotation As Integer) As Dynamic
     options = {url: url, port: port, nodejs_enabled: false, brightsign_js_objects_enabled: false, security_params: {websecurity: true, insecure_https_enabled: false}, pcm_audio_outputs: []}
+    If rotation <> 0 Then options.transform = GraphicsRotation(rotation)
     Return CreateObject("roHtmlWidget", bounds, options)
 End Function
 
@@ -452,7 +489,7 @@ Function StartWebLayer(panel As Object) As Boolean
         bounds = PanelBounds(panel, {x: 0, y: 0, width: 100, height: 100})
         panel.overlayState = "loading"
     End If
-    panel.base = HtmlLayer(url, bounds, panel.htmlPort)
+    panel.base = HtmlLayer(url, bounds, panel.htmlPort, panel.settings.rotation)
     If panel.base = invalid Then Return false
     Return panel.base.Show()
 End Function
@@ -482,7 +519,7 @@ Sub RefreshOverlay(panel As Object)
     panel.overlayPort = CreateObject("roMessagePort")
     screen = PanelBounds(panel, {x: 0, y: 0, width: 100, height: 100})
     url = LayerDocument(panel, "")
-    If url <> "" Then panel.overlay = HtmlLayer(url, screen, panel.overlayPort)
+    If url <> "" Then panel.overlay = HtmlLayer(url, screen, panel.overlayPort, panel.settings.rotation)
     If panel.overlay = invalid Then
         panel.overlayState = "error"
     Else If panel.overlay.Show() Then
@@ -681,7 +718,7 @@ Sub PanelRestart(panel As Object)
     panel.rebootAt = 0
     change = panel.change
     panel.change = ""
-    If change = "role-or-ptp" Or change = "app-update" Then
+    If change = "role-or-ptp" Or change = "app-update" Or change = "orientation" Then
         RebootSystem()
     Else If change = "video-mode" Then
         If panel.mode.SetMode(panel.settings.output) Then Return
@@ -723,6 +760,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.domain < 0 Or nextSettings.domain > 127 Or nextSettings.volume < 0 Or nextSettings.volume > 100 Then Return "Setting out of range."
     If not ValidPanelGroup(nextSettings.group) Or not ValidPanelRect(nextSettings.rect) Or not BooleanValue(nextSettings.muted) Then Return "Invalid group or video window."
     If nextSettings.output <> "3840x2160x50p" And nextSettings.output <> "1920x1080x50p" Then Return "Unsupported HDMI mode."
+    If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
     If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
     If nextSettings.overlay <> "" And not PanelWebUrl(nextSettings.overlay) Then Return "Invalid overlay URL."
     If nextSettings.ntp <> panel.settings.ntp Or nextSettings.interval <> panel.settings.interval Then
@@ -740,6 +778,8 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.role <> old.role Or nextSettings.domain <> old.domain Or nextSettings.group <> old.group Or nextSettings.leader <> old.leader Then
         nextSettings.selection = {kind: "built-in"}
         change = "role-or-ptp"
+    Else If nextSettings.rotation <> old.rotation Then
+        change = "orientation"
     Else If nextSettings.output <> old.output Then
         change = "video-mode"
     Else
@@ -1023,7 +1063,7 @@ Sub SendDisplayCec(cec As Object, wake As Boolean)
     LogEvent("CEC_COMMAND_SENT", {wake: wake})
 End Sub
 
-Function ShowHolding(mode As Object, path As String) As Dynamic
+Function ShowHolding(mode As Object, path As String, rotation = 0 As Integer) As Dynamic
     ' Keep the graphics below the hardware video. It remains visible whenever the video plane is clear.
     If not mode.SetGraphicsZOrder("back") Then
         LogEvent("HOLDING_GRAPHICS_ORDER_REJECTED", {})
@@ -1034,6 +1074,9 @@ Function ShowHolding(mode As Object, path As String) As Dynamic
     If holding = invalid Then
         LogEvent("HOLDING_WIDGET_UNAVAILABLE", {})
         Return invalid
+    End If
+    If rotation <> 0 Then
+        If not holding.SetTransform(GraphicsRotation(rotation)) Then LogEvent("HOLDING_ROTATION_REJECTED", {rotation: rotation})
     End If
     If not holding.SetDefaultMode(1) Or not holding.DisplayFile(path) Or not holding.Show() Then
         LogEvent("HOLDING_IMAGE_REJECTED", {path: path})

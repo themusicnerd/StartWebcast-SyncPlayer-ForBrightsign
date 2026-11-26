@@ -184,7 +184,7 @@ function renderStatus() {
     drawWindow(native.rect);
     for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
-    fill('#av-form', { output: native.requestedoutput, volume: native.volume, muted: native.muted });
+    fill('#av-form', { output: native.requestedoutput, rotation: native.rotation ?? 0, volume: native.volume, muted: native.muted });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
     fill('#window-form', native.rect || {});
     fill('#schedule-form', { on: native.on, off: native.off, enabled: native.scheduleenabled !== false });
@@ -429,7 +429,11 @@ $('#clear-overlay').addEventListener('click', () => {
   saveSettings(element, { overlay: '' });
 });
 $('#av-form').elements.volume.addEventListener('input', (event) => { $('#volume-label').textContent = `${event.target.value}%`; });
-form('#av-form', (fields, element) => saveSettings(element, { output: fields.output.value, volume: Number(fields.volume.value), muted: fields.muted.checked }, fields.output.value !== dashboard?.native?.output ? 'Apply the new HDMI mode and restart playback?' : undefined));
+form('#av-form', (fields, element) => {
+  const rotation = Number(fields.rotation.value);
+  const restart = fields.output.value !== dashboard?.native?.output || rotation !== (dashboard?.native?.rotation ?? 0);
+  saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
+});
 for (const [selector, power, message] of [['#cec-on', 'on', 'Power On Requested.'], ['#cec-standby', 'standby', 'Standby Requested.']]) {
   $(selector).addEventListener('click', async () => {
     await operate(() => api('display-power', 'POST', { power }), message);

@@ -55,7 +55,7 @@ function sourceUrl(value, type) {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'output', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
@@ -63,6 +63,7 @@ function sanitiseSettings(input, members, current, deviceId) {
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
   if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
+  if ('rotation' in safe && ![0, 90, 180, 270].includes(safe.rotation)) throw new RequestError(400, 'Choose 0°, 90°, 180° or 270°.');
   if ('ntp' in safe && safe.ntp !== current?.ntp) safe.ntp = networkTimeServer(safe.ntp);
   if ('interval' in safe && (!Number.isInteger(safe.interval) || (safe.interval !== 0 && (safe.interval < 120 || safe.interval > 86400)))) {
     throw new RequestError(400, 'Use 0 for the default interval or enter 120–86400 seconds.');

@@ -8,6 +8,8 @@ The top bar shows HDMI-reported TV power. **Power On** and **Standby** send loca
 
 **Updates** accepts signed packages from the operator’s computer or a configurable GitHub branch. [App Update Guide](UPDATES.md)
 
+Set **Output Rotation** in **HDMI & Audio**. Select 0°, 90°, 180° or 270° clockwise for each player. Save the setting to restart that player. The video and graphics layers rotate together, and the layout window follows the rotated coordinates. [Video Rotation API](https://docs.brightsign.biz/develop/rovideoplayer) · [HTML Widget Rotation](https://docs.brightsign.biz/develop/rohtmlwidget)
+
 Open **Help** in the top bar for offline console procedures and API examples. The instructions follow ASD-STE100 style with short commands in operating order. [ASD-STE100 Issue 9](https://www.asd-ste100.org/assets/files/ASD-STE100_ISSUE9.pdf)
 
 Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.168.1.11`, `192.168.1.12` and `192.168.1.13`. Sign in with the installation credentials. The BrightSign diagnostics server uses its own HTTPS address on port 443. The bundled interface and local library work without internet access.
