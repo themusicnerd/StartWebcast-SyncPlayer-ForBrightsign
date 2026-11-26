@@ -31,7 +31,7 @@ def provision_peers(cards):
         path.write_text(json.dumps(exchange[player]), encoding="ascii")
 
 
-def stage(root, output, openssl, update_key=None):
+def stage(root, output, openssl, update_key=None, presentation_title=None):
     players = sorted(path for path in root.iterdir() if path.is_dir() and (path / "syncplayer.json").is_file())
     if not players:
         raise ValueError("No prepared player directories were found")
@@ -41,8 +41,16 @@ def stage(root, output, openssl, update_key=None):
         package["SUITE.md"] = ROOT / "docs/SUITE.md"
         package["API_VERIFICATION.md"] = ROOT / "docs/API_VERIFICATION.md"
         package["UPDATES.md"] = ROOT / "docs/UPDATES.md"
+    test_content = ROOT / "test-content"
+    if test_content.is_dir():
+        for asset in test_content.glob("Sync Test_*.mp4"):
+            package[f"test-content/{asset.name}"] = asset
+        if (test_content / "README.md").is_file():
+            package["test-content/README.md"] = test_content / "README.md"
     if update_key is not None and not update_key.read_bytes().startswith(b"-----BEGIN PUBLIC KEY-----"):
         raise ValueError("Use the public update verification key")
+    if presentation_title is not None and (not presentation_title.strip() or len(presentation_title) > 100 or not presentation_title.isprintable()):
+        raise ValueError("Enter a presentation title of 1 to 100 characters")
     for card in players:
         config_bytes = (card / "syncplayer.json").read_bytes()
         config = json.loads(config_bytes)
@@ -54,6 +62,11 @@ def stage(root, output, openssl, update_key=None):
         if set(media) != {"media/HOLDING.jpeg", f"media/Presentation_{player}.mp4"} or any(sha256(card / name) != digest for name, digest in media.items()):
             raise ValueError(f"Media verification failed for {card.name}")
         write_card_boot_files(card, config, player, media)
+        title_file = card / "presentation-title.txt"
+        if presentation_title is not None:
+            title_file.write_text(presentation_title.strip() + "\n", encoding="utf-8")
+        if title_file.is_file():
+            package[f"{card.name}/presentation-title.txt"] = title_file
         if update_key is not None:
             destination = card / "clock/update-trust.pem"
             shutil.copyfile(update_key, destination)
@@ -86,11 +99,12 @@ def main():
     parser.add_argument("--provision", action="store_true", help="Provision private peer files and missing web logins")
     parser.add_argument("--openssl", default=shutil.which("openssl"))
     parser.add_argument("--update-key", type=Path, help="Public Ed25519 verification key for these cards")
+    parser.add_argument("--presentation-title", help="Display title for the presentation already on each SD card")
     args = parser.parse_args()
     if args.provision and not args.openssl:
         parser.error("OpenSSL is required for private provisioning")
     try:
-        print(stage(args.cards.resolve(), args.output.resolve(), args.openssl if args.provision else None, args.update_key))
+        print(stage(args.cards.resolve(), args.output.resolve(), args.openssl if args.provision else None, args.update_key, args.presentation_title))
     except (OSError, ValueError, KeyError) as error:
         parser.exit(1, f"SD update failed. {error}\n")
 

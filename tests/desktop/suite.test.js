@@ -130,16 +130,22 @@ test('persists membership, protects the leader and gates synchronised pause and 
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test('decoder report spread uses sample time while playing and position alone while paused', () => {
+test('decoder report spread estimates elapsed time while playing and measures paused positions directly', () => {
   const playback = { synced: true, cycle: 'shared', state: 'playing' };
-  const now = Date.parse('2026-11-26T10:00:03.000Z');
+  const now = 3000;
   const players = [
-    { member: true, status: { ...playback, sampleutc: '20261126T100001,000', positionms: 1000 } },
-    { member: true, status: { ...playback, sampleutc: '20261126T100002,500', positionms: 2540 } },
+    { member: true, receivedAt: 1000, status: { ...playback, positionms: 1000 } },
+    { member: true, receivedAt: 2500, status: { ...playback, positionms: 2540 } },
   ];
   assert.deepEqual(decoderTiming(players, playback, now), { count: 2, expected: 2, state: 'aligned', spreadMs: 40, estimated: true });
   assert.equal(decoderTiming(players, playback, now + 25000).state, 'collecting');
   assert.equal(decoderTiming([{ member: true, status: null }, players[1]], playback, now).state, 'waiting');
   const paused = players.map((player) => ({ ...player, status: { ...player.status, state: 'paused' } }));
   assert.deepEqual(decoderTiming(paused, { ...playback, state: 'paused' }, now), { count: 2, expected: 2, state: 'different', spreadMs: 1540, estimated: false });
+});
+
+test('accepts a display title for an imported presentation', () => {
+  assert.deepEqual(sanitiseSettings({ presentationtitle: ' Example Presentation ' }, ['A'], {}, 'A'),
+    { presentationtitle: 'Example Presentation' });
+  assert.throws(() => sanitiseSettings({ presentationtitle: 'Title\nSecond Line' }, ['A'], {}, 'A'), /Presentation Title/);
 });

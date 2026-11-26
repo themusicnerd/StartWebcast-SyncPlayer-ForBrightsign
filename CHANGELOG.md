@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.13
+
+- List the imported SD card presentation in Media Library and show its title during playback.
+- Add a 25 fps Sync Test set with frame counters and short audio pulses.
+- Enable the group playhead on followers and estimate decoder spread from reports as they arrive at the leader.
+
 ## 0.2.12
 
 - Request a group playhead jump from any admitted player. The leader announces a native PTP playback state for the requested position.

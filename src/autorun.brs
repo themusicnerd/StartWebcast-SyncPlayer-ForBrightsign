@@ -241,7 +241,9 @@ Sub HandleClockWeb(event As Dynamic)
 End Sub
 
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
-    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, audiorevision: "", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, audiorevision: "", presentationtitle: "Presentation", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
+    title = ReadAsciiFile(root + "presentation-title.txt").Trim()
+    If Len(title) > 0 And Len(title) <= 100 Then settings.presentationtitle = title
     If m.playerId = config.leader_id Then settings.role = "leader"
     scheduled = config.display_schedule <> invalid
     If scheduled Then
@@ -265,7 +267,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     config.leader_id = settings.leader
     settings.ntp = network.GetTimeServer()
     settings.interval = network.GetTimeServerIntervalSeconds()
-    panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: "Built-in presentation", source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
+    panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: settings.presentationtitle, source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
     RestoreSelection(panel)
     panel.waiting = panel.role = "leader" And panel.source = "group" And panel.settings.intent = "auto"
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
@@ -294,6 +296,7 @@ Function PanelStatus(panel As Object) As Object
     data.rotation = panel.settings.rotation
     data.audioenabled = panel.settings.audioenabled
     data.audiorevision = panel.settings.audiorevision
+    data.presentationtitle = panel.settings.presentationtitle
     If BooleanValue(panel.before) Then data.scheduledwake = panel.before
     data.cecavailable = panel.cec <> invalid
     data.cecrequest = panel.cecRequest
@@ -336,9 +339,6 @@ Function PanelPlayback(panel As Object) As Object
     current.durationms = panel.video.GetDuration()
     current.pausable = panel.role <> "follower" And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
     current.seekable = current.pausable And not current.synced And current.durationms > 0
-    If current.pausable And m.clock <> invalid Then
-        If m.clock.IsValid() Then current.sampleutc = m.clock.GetUtcDateTime().ToIsoString()
-    End If
     Return current
 End Function
 
@@ -732,7 +732,7 @@ Sub PanelFollow(panel As Object, event As Object)
     panel.revision = ""
     panel.asset = ""
     panel.source = "built-in"
-    panel.name = "Built-in presentation"
+    panel.name = panel.settings.presentationtitle
     path = panel.baseline
     If group Then
         revision = Mid(syncId, 12, 24)
@@ -757,6 +757,7 @@ Sub PanelFollow(panel As Object, event As Object)
     panel.state = "starting"
     panel.loadAt = UpTime(0)
     panel.mediaCycle = ""
+    panel.error = ""
     If PlayNative(panel.video, path, event, position) Then
         panel.mediaCycle = syncId
     Else
@@ -845,6 +846,8 @@ Function PanelSet(panel As Object, patch As Object) As String
     If nextSettings.output <> "3840x2160x50p" And nextSettings.output <> "1920x1080x50p" Then Return "Unsupported HDMI mode."
     If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
     If not BooleanValue(nextSettings.audioenabled) Then Return "Choose Whether to Enable HDMI Audio."
+    If not TextValue(nextSettings.presentationtitle) Then Return "Enter a Presentation Title."
+    If Len(nextSettings.presentationtitle) < 1 Or Len(nextSettings.presentationtitle) > 100 Then Return "Enter a Presentation Title of 1 to 100 Characters."
     If panel.scheduled And (not BooleanValue(nextSettings.scheduleenabled) Or MinuteOfDay(nextSettings.on) < 0 Or MinuteOfDay(nextSettings.off) <= MinuteOfDay(nextSettings.on)) Then Return "Invalid display schedule."
     If nextSettings.overlay <> "" And not PanelWebUrl(nextSettings.overlay) Then Return "Invalid overlay URL."
     If nextSettings.ntp <> panel.settings.ntp Or nextSettings.interval <> panel.settings.interval Then
@@ -877,6 +880,7 @@ Function PanelSet(panel As Object, patch As Object) As String
         Return "Settings could not be written."
     End If
     panel.settings = nextSettings
+    If panel.source = "built-in" Or panel.source = "built-in-local" Then panel.name = nextSettings.presentationtitle
     If change <> "" Then
         panel.change = change
         panel.rebootAt = UpTime(0) + 3
@@ -1023,7 +1027,7 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         panel.asset = ""
         panel.revision = ""
         panel.url = ""
-        panel.name = "Built-in presentation"
+        panel.name = panel.settings.presentationtitle
         If not builtIn Then
             panel.asset = body.asset
             panel.name = body.name

@@ -15,7 +15,7 @@ const outputModes = ['3840x2160x50p', '1920x1080x50p'];
 const onlineMs = 16000;
 const maxGroupJumpMs = 99999999;
 
-function decoderTiming(players, playback, now = Date.now()) {
+function decoderTiming(players, playback, now = performance.now()) {
   const included = players.filter((player) => player.member);
   const count = included.filter((player) => player.status).length;
   const summary = { count, expected: included.length };
@@ -25,13 +25,11 @@ function decoderTiming(players, playback, now = Date.now()) {
   if (!playback.cycle || included.some(({ status }) => status.cycle !== playback.cycle || status.state !== playback.state)) {
     return { ...summary, state: 'changing' };
   }
-  const positions = included.map(({ status }) => {
+  const positions = included.map(({ status, receivedAt }) => {
     if (!Number.isSafeInteger(status.positionms)) return NaN;
     if (playback.state === 'paused') return status.positionms;
-    const timestamp = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)[.,](\d{3,6})Z?$/.exec(status.sampleutc || '');
-    if (!timestamp) return NaN;
-    const age = now - Date.parse(`${timestamp[1]}-${timestamp[2]}-${timestamp[3]}T${timestamp[4]}:${timestamp[5]}:${timestamp[6]}.${timestamp[7].slice(0, 3)}Z`);
-    return age >= -2000 && age <= onlineMs ? status.positionms + age : NaN;
+    const age = now - receivedAt;
+    return age >= 0 && age <= onlineMs ? status.positionms + age : NaN;
   });
   if (positions.some((position) => !Number.isFinite(position))) return { ...summary, state: 'collecting' };
   const spreadMs = Math.round(Math.max(...positions) - Math.min(...positions));
@@ -79,7 +77,7 @@ function sourceUrl(value, type) {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
@@ -88,6 +86,10 @@ function sanitiseSettings(input, members, current, deviceId) {
   if ('audioenabled' in safe && typeof safe.audioenabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
   if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
+  if ('presentationtitle' in safe && (typeof safe.presentationtitle !== 'string' || !safe.presentationtitle.trim() || safe.presentationtitle.length > 100 || /[\p{Cc}]/u.test(safe.presentationtitle))) {
+    throw new RequestError(400, 'Enter a Presentation Title of 1 to 100 Characters.');
+  }
+  if ('presentationtitle' in safe) safe.presentationtitle = safe.presentationtitle.trim();
   if ('rotation' in safe && ![0, 90, 180, 270].includes(safe.rotation)) throw new RequestError(400, 'Choose 0°, 90°, 180° or 270°.');
   if ('ntp' in safe && safe.ntp !== current?.ntp) safe.ntp = networkTimeServer(safe.ntp);
   if ('interval' in safe && (!Number.isInteger(safe.interval) || (safe.interval !== 0 && (safe.interval < 120 || safe.interval > 86400)))) {
@@ -226,7 +228,10 @@ class Suite {
     if (typeof raw !== 'string' || raw.length > 8192) return;
     try {
       const sample = JSON.parse(raw);
-      if (typeof sample.state === 'string') this.playback = sample;
+      if (typeof sample.state === 'string') {
+        this.playback = sample;
+        this.playbackSeen = performance.now();
+      }
     } catch { /* Keep the previous complete sample. */ }
   }
 
@@ -242,7 +247,7 @@ class Suite {
     if (!playback) return null;
     const leader = this.status?.role === 'leader';
     const waiting = leader && playback.synced && playback.pausable ? this.transportPeers(playback) : [];
-    const groupSeekable = playback.synced && playback.pausable && playback.jumpversion === 1 &&
+    const groupSeekable = playback.synced && ['playing', 'paused'].includes(playback.state) && playback.durationms > 0 && playback.jumpversion === 1 &&
       (leader ? this.canGroupSeek(playback, waiting) : this.follower.groupReport()?.seekable === true);
     return { ...playback, seekable: playback.seekable || Boolean(groupSeekable), groupSeekable: Boolean(groupSeekable),
       pausable: Boolean(playback.pausable && (!playback.synced || (leader && !waiting.length))), waitingForTransport: waiting.map(({ id }) => id) };
@@ -322,9 +327,10 @@ class Suite {
     const ptp = this.observe();
     const localPlayback = this.playback || native;
     const reports = players.map((player) => {
-      if (player.id === this.id) return { ...player, status: localPlayback };
+      if (player.id === this.id) return { ...player, status: localPlayback, receivedAt: this.playbackSeen };
       const status = player.status;
-      return status?.leader === this.id && status.group === native?.group && status.domain === native?.domain ? player : { ...player, status: null };
+      return status?.leader === this.id && status.group === native?.group && status.domain === native?.domain ?
+        { ...player, receivedAt: this.peers.get(player.id).seen } : { ...player, status: null };
     });
     const timing = native?.role === 'follower' && localPlayback?.synced ? this.follower.groupReport()?.timing || { state: 'waiting', count: 1, expected: active.length } :
       decoderTiming(reports, localPlayback);
@@ -390,7 +396,10 @@ class Suite {
       if (path === '/api/v1/status') return json(response, 200, this.snapshot());
       if (path === '/api/v1/playback') return json(response, 200, this.playbackStatus());
       if (path === '/api/v1/players') return json(response, 200, this.snapshot().players);
-      if (path === '/api/v1/content') return json(response, 200, this.library.list());
+      if (path === '/api/v1/content') return json(response, 200, [
+        { id: 'presentation', name: this.status?.presentationtitle || 'Presentation', card: true, draft: [], revisions: [] },
+        ...this.library.list(),
+      ]);
       if (path === '/api/v1/settings') return json(response, 200, { native: this.status, outputModes });
       if (path === '/api/v1/ptp') return json(response, 200, this.snapshot().ptp);
       if (path === '/api/v1/lighting') return json(response, 200, this.lighting.snapshot());

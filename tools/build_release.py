@@ -81,30 +81,37 @@ def sha256(path):
         return hashlib.file_digest(file, "sha256").hexdigest()
 
 
-def create_counter(ffmpeg, path, font_path, player_id, colour):
+def create_counter(ffmpeg, path, font_path, player_id, colour, fps=FPS, seconds=SECONDS, audio_pulse=False):
     # Use a local relative font filename to avoid platform-specific filter escaping.
+    frames = fps * seconds
     filters = ",".join([
         "drawbox=x=128:y=234:w=1664:h=8:c=white:t=fill",
         f"drawtext=fontfile=counter.ttf:text='START SYNCPLAYER  /  SCREEN {player_id}'"
         ":fontcolor=white:fontsize=74:x=(w-tw)/2:y=130",
         r"drawtext=fontfile=counter.ttf:text='%{eif\:n\:d\:6}'"
         ":fontcolor=white:fontsize=320:x=(w-tw)/2:y=(h-th)/2",
-        "drawtext=fontfile=counter.ttf:text='FRAME COUNTER   /   1080p60   /   000000-000599'"
+        f"drawtext=fontfile=counter.ttf:text='FRAME COUNTER   /   1080p{fps}   /   000000-{frames - 1:06d}'"
         ":fontcolor=white:fontsize=43:x=(w-tw)/2:y=850",
         "drawbox=x=128:y=955:w=1664:h=36:c=white@0.23:t=fill",
-        "drawbox=x=128:y=955:w=1664:h=36:c=white:t=fill:enable='lt(mod(n,60),2)'",
+        f"drawbox=x=128:y=955:w=1664:h=36:c=white:t=fill:enable='lt(mod(n,{fps}),2)'",
     ])
+    audio_source = []
+    audio_output = ["-an"]
+    if audio_pulse:
+        pulse = r"aevalsrc=0.12*sin(2*PI*1000*t)*lt(mod(t\,1)\,0.055)"
+        audio_source = ["-f", "lavfi", "-i", f"{pulse}:s=48000:d={seconds}"]
+        audio_output = ["-c:a", "aac", "-b:a", "96k", "-ac", "2"]
     run([
         ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-        "-f", "lavfi", "-i", f"color=c={colour}:s={WIDTH}x{HEIGHT}:r={FPS}",
-        "-filter_threads", "1", "-vf", filters, "-frames:v", str(FRAME_COUNT),
-        "-an", "-c:v", "libx264", "-preset", "veryfast", "-threads", "2",
+        "-f", "lavfi", "-i", f"color=c={colour}:s={WIDTH}x{HEIGHT}:r={fps}:d={seconds}",
+        *audio_source, "-filter_threads", "1", "-vf", filters, "-frames:v", str(frames),
+        *audio_output, "-c:v", "libx264", "-preset", "veryfast", "-threads", "2",
         "-profile:v", "high", "-level:v", "4.2", "-pix_fmt", "yuv420p",
-        "-g", str(FPS), "-keyint_min", str(FPS), "-sc_threshold", "0", "-bf", "0",
+        "-g", str(fps), "-keyint_min", str(fps), "-sc_threshold", "0", "-bf", "0",
         "-crf", "19", "-maxrate", "6M", "-bufsize", "12M",
         "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
         "-video_track_timescale", str(TIMESCALE), "-fps_mode", "cfr",
-        "-use_editlist", "0", "-movflags", "+faststart", "-map_metadata", "-1", str(path),
+        "-use_editlist", "1" if audio_pulse else "0", "-movflags", "+faststart", "-map_metadata", "-1", str(path),
     ], cwd=font_path.parent)
 
 
@@ -220,6 +227,21 @@ def build(config_path, output, ffmpeg, ffprobe, font):
     return output / name
 
 
+def build_test_content(config_path, output, ffmpeg, font):
+    config = load_config(config_path)
+    output.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".sync-test-", dir=output) as temporary:
+        work = Path(temporary)
+        font_path = work / "counter.ttf"
+        shutil.copyfile(font, font_path)
+        for index, player in enumerate(sorted(config["players"].values())):
+            clip = work / f"Sync Test_{player}.mp4"
+            create_counter(ffmpeg, clip, font_path, player, COLOURS[index % len(COLOURS)], fps=25, seconds=30, audio_pulse=True)
+            if not fast_start(clip):
+                raise ValueError(f"Test clip is missing fast-start metadata for Player {player}")
+            clip.replace(output / clip.name)
+
+
 def main():
     windows_font = Path(os.getenv("WINDIR", r"C:\Windows")) / "Fonts/consola.ttf"
     linux_font = Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")
@@ -229,6 +251,7 @@ def main():
     parser.add_argument("--ffmpeg", default="ffmpeg", help="FFmpeg executable with libx264 and drawtext")
     parser.add_argument("--ffprobe", default="ffprobe")
     parser.add_argument("--font", type=Path, default=windows_font if os.name == "nt" else linux_font)
+    parser.add_argument("--test-content", action="store_true", help="Build the 25 fps Sync Test library clips")
     args = parser.parse_args()
     for name in ("ffmpeg", "ffprobe"):
         resolved = shutil.which(getattr(args, name))
@@ -238,6 +261,10 @@ def main():
     if not args.font.is_file():
         parser.error("Counter font missing. Pass --font with a monospaced TrueType font.")
     try:
+        if args.test_content:
+            build_test_content(args.config, args.output.resolve(), args.ffmpeg, args.font)
+            print(args.output.resolve())
+            return
         path = build(args.config, args.output, args.ffmpeg, args.ffprobe, args.font)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Build failed. {error}\n")

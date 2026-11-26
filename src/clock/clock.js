@@ -4,7 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const updateHeaders = { 'Content-Type': 'application/json', 'X-SyncPlayer-Request': 'control' };
 const dateFormat = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'long' });
 const inputFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const labels = { 'built-in': 'Built-In Presentation', 'built-in-local': 'Local Presentation', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
+const labels = { 'built-in': 'Presentation', 'built-in-local': 'Local Presentation Preview', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT Feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local Preview' };
 const states = { booting: 'Booting', idle: 'Idle', starting: 'Starting', playing: 'Playing', paused: 'Paused', stopped: 'Stopped', standby: 'Standby', ended: 'Ended', error: 'Error', blackout: 'Blackout', 'outside group': 'Outside Group', online: 'Online', offline: 'Offline', local: 'Local' };
 let dashboard;
 let library = [];
@@ -104,7 +104,8 @@ function renderPlayback(current) {
   const source = labels[current.source] || 'Source';
   $('#base-state').textContent = states[current.state] || 'Unknown';
   $('#base-state').dataset.state = current.state;
-  $('#base-source-name').textContent = ['built-in', 'built-in-local'].includes(current.source) || !current.name || current.name === source ? source : `${source} · ${current.name}`;
+  $('#base-source-name').textContent = ['built-in', 'built-in-local'].includes(current.source) ? current.name || source :
+    !current.name || current.name === source ? source : `${source} · ${current.name}`;
   $('#pause').textContent = current.state === 'paused' ? 'Resume' : 'Pause';
   $('#pause').disabled = !current.pausable;
   const slider = $('#position');
@@ -239,7 +240,7 @@ function renderStatus() {
   const timingLabels = { local: 'Local Playback', idle: 'Group Idle', waiting: 'Waiting for Players', changing: 'Group Changing Source', collecting: 'Collecting Decoder Reports', aligned: 'Decoder Positions Match', different: 'Decoder Position Difference' };
   const timingText = timingLabels[timing?.state] || `${connected}/${active.length} Reporting`;
   syncSummary.textContent = native?.role === 'standalone' ? 'Standalone' : Number.isFinite(timing?.spreadMs) ? `${timingText} · ${timing.spreadMs} ms` : timingText;
-  syncSummary.title = timing?.estimated ? 'Estimated From Native Decoder Positions and Clock Samples. HDMI Frame Alignment Requires Measurement.' : 'Reports From the Native Decoders';
+  syncSummary.title = timing?.estimated ? 'Estimated From Native Decoder Reports at the Leader. HDMI Frame Alignment Requires Measurement.' : 'Reports From the Native Decoders';
   renderMembership(players, native);
   const list = players.map((player) => {
     const info = player.status;
@@ -308,6 +309,16 @@ function renderLibrary() {
   const items = library.map((set) => {
     const card = item('article', undefined, 'library-item');
     card.append(item('h3', set.name));
+    if (set.card) {
+      card.append(item('p', 'Presentation on the SD Card', 'muted'));
+      if (native?.role !== 'follower') {
+        const controls = item('div', undefined, 'actions');
+        controls.append(action('Play Presentation', () => command('play', { id: set.id })));
+        if (native?.role === 'leader') controls.append(action('Preview Locally', () => command('play', { id: set.id, preview: true })));
+        card.append(controls);
+      }
+      return card;
+    }
     if (set.draft.length) {
       const row = item('div', undefined, 'revision');
       row.append(item('p', `Draft · Files verified for ${set.draft.join(', ')}`, 'muted'));

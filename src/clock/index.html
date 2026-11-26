@@ -22,7 +22,7 @@
           <div class="panel-heading"><h2>Playback</h2><span class="status-pill" id="playback-state">Starting</span></div>
           <h3 class="source-name" id="source-name">—</h3>
           <div class="timeline playhead"><input type="range" id="position" value="0" min="0" max="1" step="any" aria-label="Playback Position" aria-describedby="transport-help" disabled><span id="position-label">—</span></div>
-          <div class="actions"><button type="button" data-command="built-in">Play Built-In</button><button type="button" class="secondary" data-command="built-in-local">Play Locally</button><button id="pause" type="button" class="secondary" disabled>Pause</button><button type="button" class="secondary" data-command="restart">Restart</button><button type="button" class="secondary" data-command="stop">Stop</button><button type="button" class="secondary" data-command="blackout">Blackout</button><label class="check"><input type="checkbox" id="loop"> Loop</label></div>
+          <div class="actions"><button type="button" data-command="built-in">Play Presentation</button><button type="button" class="secondary" data-command="built-in-local">Play Locally</button><button id="pause" type="button" class="secondary" disabled>Pause</button><button type="button" class="secondary" data-command="restart">Restart</button><button type="button" class="secondary" data-command="stop">Stop</button><button type="button" class="secondary" data-command="blackout">Blackout</button><label class="check"><input type="checkbox" id="loop"> Loop</label></div>
           <p class="muted" id="transport-help"></p>
           <p class="feedback" id="playback-error"></p>
         </article>
@@ -41,7 +41,7 @@
           <div class="actions"><button type="submit">Upload</button><label class="check"><input type="checkbox" name="replace"> Replace Draft Files</label></div>
           <div class="timeline" id="upload-progress" hidden><progress id="upload-meter" max="100" value="0" aria-label="Upload Progress"></progress><span id="upload-label"></span></div>
         </form>
-        <div class="library-list" id="items"><p class="muted">Built-In Presentation is available from Playback.</p></div>
+        <div class="library-list" id="items"><p class="muted">Presentation is available from Playback.</p></div>
         <div id="distribution" class="distribution" hidden><p id="distribution-label"></p><button id="clear-distribution" class="secondary" type="button">Clear Distribution</button></div>
       </section>
       <section class="panel section" id="sources" aria-labelledby="sources-title">
@@ -56,7 +56,7 @@
             <div class="layer-heading"><h3 id="base-layer-title">Lower Layer <span>Base Source</span></h3><span id="base-state" class="status-pill">Reading Source</span></div>
             <p id="base-source-name" class="muted"></p>
             <p>Play one source in this layer. Choose the card presentation, an MP4, an SRT feed, or a webpage.</p>
-            <div class="actions layer-actions"><button id="source-built-in" type="button" class="secondary">Play Built-In</button><a href="#library">Choose MP4 in Media Library</a></div>
+            <div class="actions layer-actions"><button id="source-built-in" type="button" class="secondary">Play Presentation</button><a href="#library">Choose MP4 in Media Library</a></div>
             <form id="source-form" class="stack">
               <h4>Live or Web Source</h4>
               <div class="form-row"><label>Source Type<select name="type"><option value="srt">SRT Feed</option><option value="web">Webpage</option></select></label><label class="grow">Source URL<input type="text" name="url" inputmode="url" spellcheck="false" aria-describedby="source-help" required></label><button type="submit">Play Source</button></div>
@@ -92,7 +92,7 @@
       <div class="grid grid-thirds">
         <article class="panel"><form id="colour-form" class="stack"><h3>Native Video Colour</h3><div class="form-row dimensions"><label>Brightness<input type="number" name="brightness" min="-1000" max="1000" value="0" required></label><label>Hue<input type="number" name="hue" min="-1000" max="1000" value="0" required></label><label>Saturation<input type="number" name="saturation" min="-1000" max="1000" value="0" required></label></div><div class="actions"><button type="submit">Apply Colour</button><button type="button" class="secondary" id="neutral-colour">Neutral</button></div></form></article>
         <article class="panel"><form id="lighting-form" class="stack"><h3>Console Input</h3><label>Protocol<select name="protocol"><option value="off">Off</option><option value="sacn">sACN Multicast</option><option value="artnet">Art-Net Unicast</option></select></label><label>Allowed Console IP<input name="source" type="text" placeholder="192.168.1.50" spellcheck="false"></label><div class="form-row"><label>Universe<input name="universe" type="number" min="0" max="63999" required></label><label>First Channel<input name="channel" type="number" min="1" max="508" required></label></div><p id="lighting-info">Five channels control brightness, hue, saturation, clip, and transport.</p><button type="submit">Save Console Input</button></form></article>
-        <article class="panel"><form id="slot-form" class="stack"><h3>DMX Media Slots</h3><p>Slot 0 plays the built-in presentation.</p><div class="form-row"><label>Slot<input type="number" name="slot" min="1" max="255" value="1" required></label><label class="grow">Media<select name="media"><option value="">Unassigned</option></select></label><button type="submit" class="secondary">Save Slot</button></div><ol id="slot-list" class="activity"></ol></form></article>
+        <article class="panel"><form id="slot-form" class="stack"><h3>DMX Media Slots</h3><p>Slot 0 plays the presentation.</p><div class="form-row"><label>Slot<input type="number" name="slot" min="1" max="255" value="1" required></label><label class="grow">Media<select name="media"><option value="">Unassigned</option></select></label><button type="submit" class="secondary">Save Slot</button></div><ol id="slot-list" class="activity"></ol></form></article>
       </div>
     </section>
 
@@ -114,7 +114,7 @@
           <h3 id="console-help-title">Use the Console</h3>
           <details open><summary>Play and Control Media</summary><ol>
             <li>Open <a href="#overview">Overview</a>.</li>
-            <li>Select <strong>Play Built-In</strong> to start the presentation.</li>
+            <li>Select <strong>Play Presentation</strong> to start the presentation.</li>
             <li>Select <strong>Pause</strong> to hold the current frame.</li>
             <li>Select <strong>Resume</strong> to continue.</li>
             <li>Select <strong>Play Locally</strong> to use the playhead on this player.</li>
@@ -159,7 +159,7 @@
           <details><summary>Set Sources, Layers and Lighting</summary><ol>
             <li>Open <a href="#sources">Sources &amp; Layers</a>.</li>
             <li>Read the current source under <strong>Lower Layer</strong>.</li>
-            <li>Select <strong>Play Built-In</strong> or choose an MP4 from <strong>Media Library</strong>.</li>
+            <li>Select <strong>Play Presentation</strong> or choose an MP4 from <strong>Media Library</strong>.</li>
             <li>Select <strong>SRT Feed</strong> or <strong>Webpage</strong>.</li>
             <li>Enter the URL. Select <strong>Play Source</strong>.</li>
             <li>Set the window position and size. Select <strong>Apply Window</strong>.</li>
@@ -199,7 +199,7 @@
               <dt>GET <code>/status</code></dt><dd>Read player status.</dd>
               <dt>GET <code>/playback</code></dt><dd>Read the playhead position in milliseconds.</dd>
               <dt>GET <code>/clock</code></dt><dd>Read the clock and time zone.</dd>
-              <dt>POST <code>/play</code></dt><dd>Send <code>{"id":"presentation"}</code> to play the built-in presentation.</dd>
+              <dt>POST <code>/play</code></dt><dd>Send <code>{"id":"presentation"}</code> to play the presentation.</dd>
               <dt>POST <code>/pause</code>, <code>/resume</code> or <code>/stop</code></dt><dd>Send <code>{}</code>.</dd>
               <dt>POST <code>/seek</code></dt><dd>Send <code>{"positionMs":30000}</code> to move a local MP4 to 30 seconds.</dd>
               <dt>PUT <code>/group/members/B</code></dt><dd>Send <code>{"included":true}</code> to add provisioned Player B.</dd>

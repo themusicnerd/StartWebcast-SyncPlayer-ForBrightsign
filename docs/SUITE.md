@@ -8,6 +8,8 @@ The top bar shows HDMI-reported TV power. **Power On** and **Standby** send loca
 
 **Updates** accepts signed packages from the operator’s computer or a configurable GitHub branch. [App Update Guide](UPDATES.md)
 
+**Media Library** lists the presentation already on the SD card and any media you upload. The generated **Sync Test** clips include a frame counter and a short tone for each second. [Sync Test Clips](../test-content)
+
 Set **Output Rotation** in **HDMI & Audio**. Select 0°, 90°, 180° or 270° clockwise for each player. Save the setting to restart that player. The video and graphics layers rotate together, and the layout window follows the rotated coordinates. [Video Rotation API](https://docs.brightsign.biz/develop/rovideoplayer) · [HTML Widget Rotation](https://docs.brightsign.biz/develop/rohtmlwidget)
 
 All players use HDMI audio by default. Use **Enable Audio** or **Disable Audio** in **Group Membership** on the leader to select any combination of players. In **HDMI & Audio**, set the local audio, volume or mute. The group audio state displays Pending until the follower acknowledges the change.
@@ -19,7 +21,7 @@ Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.
 ## Playback and media
 
 - **Play Built-In** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source. **Loop** controls repeat playback of a local MP4. The schedule sends display power commands while playback continues.
-- The playhead shows the native playback position once per second. **Pause** becomes **Resume** after a pause. Use **Play locally**, a library preview, or Standalone mode to drag or keyboard-adjust the playhead. Group Pause and Resume require the included followers to report the same clip and playback state. They use BrightSign's shared timestamp. [BrightSign video transport](https://docs.brightsign.biz/develop/rovideoplayer)
+- The playhead shows the native playback position once per second. **Pause** becomes **Resume** after a pause. Drag or use the keyboard to move the playhead. During group playback, use any included player to start the group at the selected position. Group controls become available when the included followers report the same clip and playback state. [BrightSign Video Transport](https://docs.brightsign.biz/develop/rovideoplayer)
 - In **Media library**, upload one MP4 per member. Use names such as `Welcome_A.mp4`, `Welcome_B.mp4` and `Welcome_C.mp4`. Fast-start H.264 or H.265 MP4s with constant video frame timing and optional AAC-LC audio are accepted within the documented limits. The leader streams each upload to a temporary file, validates its metadata, checks native playability for its own file, and stores the SHA-256 digest. Each set retains its earlier complete revisions while you upload a replacement.
 - **Preview on this player** plays the leader's file locally. **Distribute** publishes a complete revision to the configured followers. Followers download their matching file and verify its size, SHA-256 and native playability. **Play group** requires fresh reports from every follower that confirm the same revision, group, PTP domain and HDMI mode. Timing uses native SyncManager. A reconnecting follower can start on a subsequent native transition. The console reports reachability and readiness separately from measured sync quality.
 - In **Standalone**, upload the file for the local player and choose **Play on this player**. The local selection is saved and the player runs without a SyncManager session.
@@ -93,7 +95,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 
 `PUT /settings` accepts `volume` (0–100), `muted` (Boolean), `audioenabled` (Boolean), `output` (`3840x2160x50p` or `1920x1080x50p`), `rotation` (0, 90, 180 or 270), `ntp`, `interval` (0 or 120–86400), `on` and `off` (Sydney `HH:MM`), `scheduleenabled` (Boolean), `role`, `leader`, `domain` (0–127), `group`, `rect` (`x`, `y`, `width`, `height` as percentages) and `overlay` (URL, or an empty string to clear). Output, rotation and role changes return an acknowledgement before the restart. Read `/status` afterwards for the applied state.
 
-The Players panel compares native decoder reports from the same playback cycle. During playback, the console estimates the position difference from timestamped samples. During pause, it compares the stopped positions directly. Physical HDMI frame alignment requires an output measurement.
+The Players panel compares native decoder reports from the same playback cycle. During playback, the console estimates the position difference using the time each report arrived at the leader. During pause, it compares the stopped positions directly. Physical HDMI frame alignment requires an output measurement.
 
 From a workstation, use the specific player's public `clock-cert.pem` for HTTPS verification. These examples prompt for the installation password.
 
