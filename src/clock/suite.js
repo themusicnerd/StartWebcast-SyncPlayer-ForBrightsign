@@ -158,7 +158,7 @@ async function thermalSensors() {
 
 function sanitiseSettings(input, members, current, deviceId) {
   const keys = Object.keys(input);
-  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'cecremote', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
+  if (!keys.length || keys.some((key) => !['volume', 'muted', 'audioenabled', 'cecremote', 'output', 'rotation', 'ntp', 'interval', 'on', 'off', 'scheduleenabled', 'leader', 'role', 'domain', 'group', 'genlock', 'rect', 'overlay', 'presentationtitle'].includes(key))) {
     throw new RequestError(400, 'Unknown or missing device setting.');
   }
   const safe = { ...input };
@@ -166,6 +166,7 @@ function sanitiseSettings(input, members, current, deviceId) {
   if ('muted' in safe && typeof safe.muted !== 'boolean') throw new RequestError(400, 'Mute must be true or false.');
   if ('audioenabled' in safe && typeof safe.audioenabled !== 'boolean') throw new RequestError(400, 'Choose Whether to Enable HDMI Audio.');
   if ('cecremote' in safe && typeof safe.cecremote !== 'boolean') throw new RequestError(400, 'CEC Remote Playback Must Be True or False.');
+  if ('genlock' in safe && typeof safe.genlock !== 'boolean') throw new RequestError(400, 'HDMI Genlock Must Be True or False.');
   if ('scheduleenabled' in safe && typeof safe.scheduleenabled !== 'boolean') throw new RequestError(400, 'Schedule Enabled must be true or false.');
   if ('output' in safe && !outputModes.includes(safe.output)) throw new RequestError(400, 'Select one of the supported 50 Hz modes.');
   if ('presentationtitle' in safe && (typeof safe.presentationtitle !== 'string' || !safe.presentationtitle.trim() || safe.presentationtitle.length > 100 || /[\p{Cc}]/u.test(safe.presentationtitle))) {

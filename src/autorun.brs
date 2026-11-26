@@ -180,14 +180,9 @@ Sub RunPlayback(port As Object)
             LogEvent("SYNC_ROLE_REJECTED", {leader: leader})
             Return
         End If
-        If config.enable_genlock Then
-            If not mode.SetSyncDomain(config.group_id) Then
-                LogEvent("GENLOCK_REQUEST_REJECTED", {})
-                Return
-            End If
-        End If
         panel.manager = manager
     End If
+    ApplyPanelGenlock(panel)
 
     loopSetting = "NoLoop"
     If config.loop_mode = "seamless" Then loopSetting = "SeamlessLoopOrNotAtAll"
@@ -210,7 +205,7 @@ Sub RunPlayback(port As Object)
     panel.readyAt = UpTime(0) + 10
     panel.state = "idle"
     panel.ready = true
-    LogEvent("NATIVE_READY", {output_mode: mode.GetMode(), ptp_domain: config.ptp_domain, genlock_requested: config.enable_genlock, sync_quality: "unknown"})
+    LogEvent("NATIVE_READY", {output_mode: mode.GetMode(), ptp_domain: config.ptp_domain, genlock_requested: panel.settings.genlock, genlock_state: panel.genlockState, sync_quality: "unknown"})
     While true
         PanelTick(panel)
         event = Wait(500, port)
@@ -261,6 +256,7 @@ End Sub
 Function NewPanel(config As Object, device As Object, mode As Object, network As Object, clock As Dynamic, root As String, address As String, target As String, path As String, contentId As String, port As Object) As Object
     settings = {role: "follower", leader: config.leader_id, domain: config.ptp_domain, group: config.group_id, output: target, rotation: 0, volume: 100, muted: false, audioenabled: true, cecremote: false, audiorevision: "", presentationtitle: "Presentation", rect: {x: 0, y: 0, width: 100, height: 100}, overlay: "", loop: true, intent: "auto", selection: {kind: "built-in"}}
     settings.streamfallback = {id: "", asset: "", name: ""}
+    settings.genlock = config.enable_genlock
     title = ReadAsciiFile(root + "presentation-title.txt").Trim()
     If Len(title) > 0 And Len(title) <= 100 Then settings.presentationtitle = title
     If m.playerId = config.leader_id Then settings.role = "leader"
@@ -281,6 +277,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
         End If
     End If
     If not ValidRotation(settings.rotation) Then settings.rotation = 0
+    If not BooleanValue(settings.genlock) Then settings.genlock = config.enable_genlock
     If settings.intent = "stop" Then settings.intent = "auto"
     config.group_id = settings.group
     config.ptp_domain = settings.domain
@@ -290,6 +287,7 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     panel = {settings: settings, registry: registry, role: settings.role, address: address, root: root, mode: mode, network: network, clock: clock, port: port, model: device.GetModel(), firmware: device.GetVersion(), serial: device.GetDeviceUniqueId(), defaultMode: target, baseline: path, baselinePrefix: contentId, nativeLoop: config.loop_mode, scheduled: scheduled, manager: invalid, video: invalid, cec: invalid, ready: false, screens: false, before: invalid, autostart: false, rebootAt: 0, change: "", sequence: 0, syncId: "", syncTime: "", state: "booting", error: "", asset: "", revision: "", name: settings.presentationtitle, source: "built-in", url: "", base: invalid, overlay: invalid, htmlPort: invalid, overlayPort: invalid, overlayState: "off", loadAt: 0}
     panel.localOverride = false
     panel.groupCue = invalid
+    panel.genlockState = "off"
     RestoreSelection(panel)
     panel.waiting = panel.role = "leader" And panel.source = "group" And panel.settings.intent = "auto"
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
@@ -314,6 +312,19 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     Return panel
 End Function
 
+Sub ApplyPanelGenlock(panel As Object)
+    If panel.role = "standalone" Then
+        panel.genlockState = "standalone"
+    Else If panel.settings.genlock Then
+        If panel.mode.SetSyncDomain(panel.settings.group) Then
+            panel.genlockState = "requested"
+        Else
+            panel.genlockState = "rejected"
+            LogEvent("GENLOCK_REQUEST_REJECTED", {group: panel.settings.group})
+        End If
+    End If
+End Sub
+
 Function SavePanel(panel As Object, settings As Object) As Boolean
     If panel.registry = invalid Then Return false
     saved = {}
@@ -337,6 +348,8 @@ Function PanelStatus(panel As Object) As Object
     data.cecremote = panel.settings.cecremote
     data.ident = panel.startup <> invalid
     data.identmode = panel.identMode
+    data.genlock = panel.settings.genlock
+    data.genlockstate = panel.genlockState
     data.streamfallback = panel.settings.streamfallback
     data.network = PanelNetwork(panel.network.GetCurrentConfig())
     data.networkresult = panel.networkResult
@@ -1105,7 +1118,7 @@ Sub PanelRestart(panel As Object)
     panel.change = ""
     If change = "network" Then
         CommitPanelNetwork(panel)
-    Else If change = "role-or-ptp" Or change = "app-update" Or change = "orientation" Then
+    Else If change = "role-or-ptp" Or change = "app-update" Or change = "orientation" Or change = "genlock" Then
         RebootSystem()
     Else If change = "video-mode" Then
         If panel.mode.SetMode(panel.settings.output) Then Return
@@ -1151,6 +1164,7 @@ Function PanelSet(panel As Object, patch As Object) As String
     If not ValidRotation(nextSettings.rotation) Then Return "Choose 0°, 90°, 180° or 270°."
     If not BooleanValue(nextSettings.audioenabled) Then Return "Choose Whether to Enable HDMI Audio."
     If not BooleanValue(nextSettings.cecremote) Then Return "Choose Whether to Enable CEC Remote Playback."
+    If not BooleanValue(nextSettings.genlock) Then Return "Choose Whether to Request HDMI Genlock."
     fallback = nextSettings.streamfallback
     If Type(fallback) <> "roAssociativeArray" Then Return "Invalid Stream Fallback."
     If not TextValue(fallback.id) Or not TextValue(fallback.name) Or not TextValue(fallback.asset) Then Return "Invalid Stream Fallback."
@@ -1179,6 +1193,8 @@ Function PanelSet(panel As Object, patch As Object) As String
         change = "role-or-ptp"
     Else If nextSettings.rotation <> old.rotation Then
         change = "orientation"
+    Else If nextSettings.genlock <> old.genlock Then
+        change = "genlock"
     Else If nextSettings.output <> old.output Then
         change = "video-mode"
     Else

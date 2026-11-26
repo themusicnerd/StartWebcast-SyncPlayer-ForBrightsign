@@ -320,7 +320,10 @@ function renderStatus() {
       leader.replaceChildren(...players.map((player) => Object.assign(item('option', `Player ${player.id}`), { value: player.id })));
       fill('#role-form', native);
       leader.disabled = native.role !== 'follower';
+      roleForm.elements.genlock.disabled = native.role === 'standalone';
     }
+    const genlockLabels = { off: 'HDMI Genlock Off', requested: 'Requested · Lock Unverified', rejected: 'Request Rejected · PTP Still Enabled', standalone: 'Unavailable in Standalone Mode' };
+    $('#genlock-status').textContent = native.pending ? 'Restart Pending' : genlockLabels[native.genlockstate] || 'HDMI Genlock Status Unavailable';
     const reports = players.filter((player) => player.status && player.status.role !== 'standalone').map((player) => `${player.id} reports ${player.status.domain}`);
     const heard = ptp.listening ? (ptp.domains.length ? `Heard on LAN ${ptp.domains.join(', ')}` : 'No multicast announcements heard recently') : 'Multicast listener unavailable';
     $('#ptp-use').textContent = [...reports, heard].join(' · ');
@@ -810,13 +813,16 @@ form('#network-form', async (fields) => {
 $('#role-form').elements.role.addEventListener('change', (event) => {
   const fields = $('#role-form').elements;
   fields.leader.disabled = event.target.value !== 'follower';
+  fields.genlock.disabled = event.target.value === 'standalone';
   if (event.target.value === 'leader') fields.leader.value = dashboard?.native?.playerid;
   else if (event.target.value === 'follower' && fields.leader.value === dashboard?.native?.playerid) fields.leader.value = dashboard?.players.find((player) => player.id !== dashboard.native.playerid)?.id;
 });
 form('#role-form', (fields, element) => {
   const role = fields.role.value;
   const leader = role === 'leader' ? dashboard?.native?.playerid : fields.leader.value;
-  saveSettings(element, { role, leader, domain: Number(fields.domain.value), group: fields.group.value }, 'Apply these role and PTP settings? Changed settings restart this player.');
+  const settings = { role, leader, domain: Number(fields.domain.value), group: fields.group.value };
+  if (role !== 'standalone') settings.genlock = fields.genlock.checked;
+  saveSettings(element, settings, 'Apply These Playback and PTP Settings? Changes Restart This Player.');
 });
 form('#schedule-form', (fields, element) => saveSettings(element, { on: fields.on.value, off: fields.off.value, scheduleenabled: fields.enabled.checked }));
 form('#member-form', (fields) => { if (fields.player.value) void changeMembership(fields.player.value, true); });

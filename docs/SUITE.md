@@ -61,6 +61,7 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 - **Test Pattern** shows offline colour bars and the player name. Select **Test Pattern** again to hide it. Playback continues underneath.
 - **Updates** shows the installed BrightSignOS version. Open the BrightSign updater, sign in to the Diagnostic Web Server, then select **Advanced** and **BrightSignOS Update**. [BrightSign DWS](https://docs.brightsign.biz/manage/diagnostic-web-server-dws)
 - **Playback mode & PTP** selects Leader, Follower or Standalone. Followers must select the new leader explicitly. Apply the same group name and IEEE 1588 domain to all group members. Change the old leader to a follower as part of a planned handover. Role and domain changes restart the affected player. The console lists domains reported by configured players and IPv4 multicast announcements the optional receive-only listener hears on the local interface. Other VLANs, profiles and unicast timing may be invisible.
+- **Request HDMI Genlock** is off by default and applies to the selected player in a group. Changing it restarts the player. **Requested · Lock Unverified** means the firmware accepted the request. **Request Rejected · PTP Still Enabled** means playback continues using native PTP. BrightSign documents lock-state readback on XC5 and XT5. [BrightSign video mode API](https://docs.brightsign.biz/develop/rovideomode#set-sync-domain)
 - **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily CEC wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
 ## Lighting input
@@ -110,6 +111,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `GET /players/{id}/preview?v={epoch}` | Read the corresponding 160 × 90 JPEG. |
 | `GET /network`, `PUT /network` | Read the active Ethernet profile. Apply `{"mode":"static","address":"192.168.1.11","netmask":"255.255.255.0","gateway":"","dns":[],"confirm":true}` or use `mode: dhcp`. Group DHCP also requires `"reserved":true`. |
 | `GET /settings`, `PUT /settings` | Current state or a partial settings update |
+| `PUT /settings` with `{"genlock":true}` | Request HDMI genlock on this group player and restart. Read `native.genlockstate` in `/status` to see the request result. |
 | `GET /ptp` | Multicast listener state and recently heard domains |
 | `PUT /colour` | `{"brightness":0,"hue":0,"saturation":0}`. Each value is an integer −1000 to 1000 |
 | `GET /lighting`, `PUT /lighting` | Current lighting settings or `{"protocol":"sacn","source":"192.168.1.50","universe":1,"channel":1}`. Use `"protocol":"off"` to close the listener |

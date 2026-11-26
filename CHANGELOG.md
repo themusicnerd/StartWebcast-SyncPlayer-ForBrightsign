@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.21
+
+- Add an opt-in HDMI genlock request under Playback Mode & PTP. Report rejection or unverified lock and continue PTP playback after a rejection.
+
 ## 0.2.20
 
 - Show the player name in the browser tab.

@@ -3,6 +3,20 @@ Sub Main()
     m.systemLog = invalid
     m.playerId = "A"
     m.failures = 0
+    outputMode = {SetSyncDomain: FakeGenlockDomain, requestedDomain: "", accept: false}
+    genlockPanel = {role: "leader", settings: {group: "example-wall", genlock: false}, mode: outputMode, genlockState: "off"}
+    ApplyPanelGenlock(genlockPanel)
+    Check(genlockPanel.genlockState = "off" And outputMode.requestedDomain = "", "genlock is opt-in")
+    genlockPanel.settings.genlock = true
+    ApplyPanelGenlock(genlockPanel)
+    Check(genlockPanel.genlockState = "rejected" And outputMode.requestedDomain = "example-wall", "reject genlock without aborting startup")
+    outputMode.accept = true
+    ApplyPanelGenlock(genlockPanel)
+    Check(genlockPanel.genlockState = "requested", "accepted request does not imply lock")
+    genlockPanel.role = "standalone"
+    outputMode.requestedDomain = ""
+    ApplyPanelGenlock(genlockPanel)
+    Check(genlockPanel.genlockState = "standalone" And outputMode.requestedDomain = "", "standalone skips genlock")
 
     config = ParseJson("{""schema_version"":1,""group_id"":""bench"",""ptp_domain"":15,""apply_ptp_settings"":false,""enable_genlock"":false,""loop_mode"":""seamless"",""leader_id"":""A"",""players"":{""192.168.1.11"":""A"",""192.168.1.12"":""B""}}")
     Check(ValidConfig(config), "valid configuration")
@@ -184,6 +198,11 @@ Sub Main()
     Check(localVideo.transportStamp = "20261126T160000,500", "native transport keeps its timestamp")
     If m.failures = 0 Then Print "NATIVE_MOCK_TESTS_PASSED"
 End Sub
+
+Function FakeGenlockDomain(domain As String) As Boolean
+    m.requestedDomain = domain
+    Return m.accept
+End Function
 
 Sub Check(condition As Boolean, description As String)
     If not condition Then
