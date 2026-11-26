@@ -130,6 +130,12 @@ Sub Main()
     localPanel = {ready: true, screens: true, base: invalid, settings: {overlay: ""}, role: "standalone", source: "built-in", asset: "", baseline: clip, manager: invalid, video: localVideo}
     Check(StartPanel(localPanel), "standalone starts with no SyncManager")
     Check(localVideo.lastInput.Filename = clip And localVideo.lastInput.SyncIsoTimestamp = invalid, "standalone sends only the local file to the decoder")
+    localVideo.Pause = FakePause
+    localVideo.Resume = FakeResume
+    localPanel.state = "playing"
+    Check(PanelTransport(localPanel, "pause", "") = "" And localPanel.state = "paused", "local pause")
+    Check(PanelTransport(localPanel, "resume", "20261126T160000,500") = "" And localPanel.state = "playing", "transport resumes")
+    Check(localVideo.transportStamp = "20261126T160000,500", "native transport keeps its timestamp")
     If m.failures = 0 Then Print "NATIVE_MOCK_TESTS_PASSED"
 End Sub
 
@@ -155,6 +161,16 @@ Function FakePlayFile(params As Object) As Boolean
     m.calls = m.calls + 1
     m.lastInput = params
     Return m.accept
+End Function
+
+Function FakePause(params As Object) As Boolean
+    m.transportStamp = params.SyncIsoTimeStamp
+    Return true
+End Function
+
+Function FakeResume(params As Object) As Boolean
+    m.transportStamp = params.SyncIsoTimeStamp
+    Return true
 End Function
 
 Function FakeEvent(id As String, timestamp As String) As Object

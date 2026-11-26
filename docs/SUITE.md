@@ -5,10 +5,15 @@ Use HTTPS on port 8080 from the management LAN. The prepared addresses are `192.
 ## Playback and media
 
 - **Play built-in** returns to the presentation on the card. **Stop** clears the video and shows the holding image. **Blackout** hides both layers. **Restart** restarts the selected source, and **Loop** controls repeat playback of a local MP4. The Sydney display schedule still applies.
+- The playhead shows the native playback position once per second. **Pause** becomes **Resume** after a pause. Use **Play locally**, a library preview, or Standalone mode to drag or keyboard-adjust the playhead. Group Pause and Resume require the included followers to report the same clip and playback state. They use BrightSign's shared timestamp. [BrightSign video transport](https://docs.brightsign.biz/develop/rovideoplayer)
 - In **Media library**, upload one MP4 per member. Use names such as `Welcome_A.mp4`, `Welcome_B.mp4` and `Welcome_C.mp4`. Fast-start H.264 or H.265 MP4s with constant video frame timing and optional AAC-LC audio are accepted within the documented limits. The leader streams each upload to a temporary file, validates its metadata, checks native playability for its own file, and stores the SHA-256 digest. Each set retains its earlier complete revisions while you upload a replacement.
 - **Preview on this player** plays the leader's file locally. **Distribute** publishes a complete revision to the configured followers. Followers download their matching file and verify its size, SHA-256 and native playability. **Play group** requires fresh reports from every follower that confirm the same revision, group, PTP domain and HDMI mode. Timing uses native SyncManager. A reconnecting follower can start on a subsequent native transition. The console reports reachability and readiness separately from measured sync quality.
 - In **Standalone**, upload the file for the local player and choose **Play on this player**. The local selection is saved and the player runs without a SyncManager session.
 - Delete actions require confirmation. A selected or distributing revision remains protected. Clear distribution when finished with an inactive revision you want to remove.
+
+## Group membership
+
+Use **Group membership** on the leader to add or remove a provisioned follower. The leader keeps its place in the group. Membership applies to media requirements, distribution, and group transport. An updated follower stops group playback after receiving its exclusion on an authenticated heartbeat. Re-added followers can prepare their files and join on a subsequent native start. Update the followers to 0.2.4 before relying on remote exclusion or group Pause and Resume. To introduce an address or player ID to the installation, commission its card and peer credentials first.
 
 ## Lower and upper layers
 
@@ -45,12 +50,16 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | Method and path below `/api/v1` | Body or purpose |
 | --- | --- |
 | `GET /status` | Native state, standby, peer reports, free storage, PTP observations and recent activity |
+| `GET /playback` | Latest one-second decoder position with state and transport availability |
 | `GET /players` | Player addresses and current reports |
+| `PUT /group/members/{id}` | `{"included":false}` removes a provisioned follower. Use `true` to add it back |
 | `GET /content` | Draft and complete revision summaries |
 | `PUT /uploads?name=Welcome_A.mp4&replace=0` | Raw `application/octet-stream` body with `Content-Length`. Set `replace=1` to replace an existing draft clip |
 | `POST /distribute` | `{"id":"...","revision":"..."}` or `{"clear":true}` |
 | `GET /jobs/distribution` | Current assigned revision and each player's report |
-| `POST /play` | `{"id":"presentation"}`, or uploaded set `id` and optional `revision`. Add `"preview":true` for a local preview |
+| `POST /play` | `{"id":"presentation"}`, or uploaded set `id` and optional `revision`. Add `"preview":true` for local playback |
+| `POST /pause`, `/resume` | `{}` |
+| `POST /seek` | `{"positionMs":30000}` during local MP4 playback |
 | `POST /stop`, `/restart`, `/blackout` | `{}` |
 | `POST /loop` | `{"enabled":true}` |
 | `POST /source` | `{"type":"web","url":"https://server/page.html"}` or `type: srt` with an SRT URL |

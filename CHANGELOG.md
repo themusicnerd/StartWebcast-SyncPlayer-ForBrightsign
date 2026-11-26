@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4 · 26 November 2026
+
+- Keep navigation in view and highlight the current section. Balance the dashboard in equal two-, three- and four-column sections.
+- Add operator controls for including and excluding provisioned followers. Media requirements follow the active roster.
+- Update the playhead from the device once per second. Add native Pause and Resume and let operators drag the playhead during local MP4 playback.
+
 ## 0.2.3 · 26 November 2026
 
 - Use the bundled transparent HTML compositor for the overlay above native MP4 and SRT sources as well as webpages.

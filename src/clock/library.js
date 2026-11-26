@@ -103,6 +103,19 @@ async function initStorage(root) {
   }
 }
 
+function completeDraft(set, members) {
+  if (!members.every((member) => set.draft[member])) return false;
+  const files = Object.fromEntries(members.map((member) => [member, set.draft[member]]));
+  const identifiers = members.map((member) => `${member}:${files[member].digest}`).join('/');
+  const revision = createHash('sha256').update(identifiers).digest('hex').slice(0, 24);
+  if (!set.revisions.some((entry) => entry.revision === revision)) {
+    if (set.revisions.length >= 20) return false;
+    set.revisions.push({ revision, files });
+  }
+  for (const member of members) delete set.draft[member];
+  return true;
+}
+
 class Library {
   constructor(root, members, probe) {
     this.root = root;
@@ -164,13 +177,7 @@ class Library {
         if (target === leader && !await this.probe(digest)) throw new RequestError(422, 'This XD236 rejected the uploaded video.');
         const replaced = set.draft[target]?.digest;
         set.draft[target] = { digest, length, metadata };
-        const complete = this.members.every((member) => set.draft[member]);
-        if (complete) {
-          const identifiers = this.members.map((member) => `${member}:${set.draft[member].digest}`).join('/');
-          const revision = createHash('sha256').update(identifiers).digest('hex').slice(0, 24);
-          if (!set.revisions.some((entry) => entry.revision === revision)) set.revisions.push({ revision, files: set.draft });
-          set.draft = {};
-        }
+        const complete = completeDraft(set, this.members);
         next.sets[id] = set;
         return { id, name: set.name, player: target, complete, replaced };
       } finally {
@@ -191,7 +198,7 @@ class Library {
   async distribute(id, revision) {
     return this.transaction((next) => {
       const { set, stored } = this.get(id, revision);
-      if (!stored) throw new RequestError(409, 'Upload and verify a file for every player first.');
+      if (!this.covers(stored)) throw new RequestError(409, 'Upload and verify a file for every current group member first.');
       next.dispatch = { id: set.id, revision: stored.revision };
       return next.dispatch;
     });
@@ -199,10 +206,22 @@ class Library {
 
   assignment(player, revision) {
     const job = this.state.dispatch;
-    if (!job || (revision && revision !== job.revision)) return null;
+    if (!this.members.includes(player) || !job || (revision && revision !== job.revision)) return null;
     const { stored } = this.get(job.id, job.revision);
+    if (!this.covers(stored)) return null;
     const { digest, length } = stored.files[player];
     return { revision: stored.revision, digest, length };
+  }
+
+  covers(stored) {
+    return Boolean(stored && this.members.every((member) => stored.files[member]));
+  }
+
+  async setExcluded(excluded, active) {
+    await this.transaction((next) => {
+      next.excluded = excluded;
+      for (const set of Object.values(next.sets)) completeDraft(set, active);
+    });
   }
 
   list() {

@@ -1,6 +1,6 @@
 # StartWebcast SyncPlayer
 
-StartWebcast SyncPlayer **0.2.3** runs from microSD on BrightSign XD236. It offers standalone playback and native PTP/SyncManager group playback. Three-player hardware acceptance is pending.
+StartWebcast SyncPlayer **0.2.4** runs from microSD on BrightSign XD236. It offers standalone playback and native PTP/SyncManager group playback. Three-player hardware acceptance is pending.
 
 | Screen | Role | Primary Ethernet address |
 | --- | --- | --- |

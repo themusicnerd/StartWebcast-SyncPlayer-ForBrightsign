@@ -84,6 +84,7 @@ class Follower {
     this.problem = '';
     this.nextAttempt = 0;
     this.busy = false;
+    this.preparing = false;
   }
 
   async pulse(status) {
@@ -96,9 +97,16 @@ class Follower {
     const base = `/peer/v1/players/${status.playerid}`;
     try {
       const response = await connect(node, `${base}/heartbeat`, 'POST', { status, ready: this.ready, problem: this.problem });
-      const { assignment } = await replyJson(response);
-      if (assignment && assignment.revision !== this.ready) await this.prepare(node, base, assignment);
-      this.problem = '';
+      const reply = await replyJson(response);
+      const admitted = reply.admitted !== false;
+      if (!admitted) this.ready = '';
+      await this.native('membership', { admitted });
+      if (admitted && reply.assignment && reply.assignment.revision !== this.ready && !this.preparing) {
+        this.preparing = true;
+        void this.prepare(node, base, reply.assignment).then(() => { this.problem = ''; }).catch((error) => {
+          this.problem = error.message.slice(0, 160);
+        }).finally(() => { this.preparing = false; });
+      }
     } catch (error) {
       this.problem = error.message.slice(0, 160);
       this.nextAttempt = performance.now() + 8000;

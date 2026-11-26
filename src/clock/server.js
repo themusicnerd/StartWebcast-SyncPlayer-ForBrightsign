@@ -17,10 +17,14 @@ const sydney = new Intl.DateTimeFormat('sv-SE', {
   hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
 });
 
-function clockRequest(port) {
+function clockRequest(port, telemetry = () => {}) {
   let pending;
   port.addEventListener('bsmessage', (reply) => {
-    if (!pending || reply.protocol !== protocol || reply.id !== pending.id) return;
+    if (reply?.protocol === 'start-syncplayer-playback-v1') {
+      telemetry(reply.status);
+      return;
+    }
+    if (!pending || reply?.protocol !== protocol || reply.id !== pending.id) return;
     clearTimeout(pending.timer);
     const { resolve } = pending;
     pending = undefined;
@@ -210,8 +214,9 @@ if (require.main === module) {
     let exchange = {};
     try { exchange = JSON.parse(readFileSync(join(__dirname, 'peer-credentials.json'), 'utf8')); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const requestClock = clockRequest(new MessagePort());
-    const suite = new Suite({ host, config, root: join(__dirname, '..', 'library'), native: requestClock, exchange });
+    let suite;
+    const requestClock = clockRequest(new MessagePort(), (status) => suite?.receivePlayback(status));
+    suite = new Suite({ host, config, root: join(__dirname, '..', 'library'), native: requestClock, exchange });
     const server = makeServer({ host, port, tls, credentials, requestClock, suite });
     server.on('error', () => console.error('StartWebcast SyncPlayer server could not start.'));
     suite.init().then(() => {

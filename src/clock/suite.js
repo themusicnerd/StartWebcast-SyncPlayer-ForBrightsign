@@ -111,6 +111,7 @@ class Suite {
     this.host = host;
     this.native = native;
     this.status = null;
+    this.playback = null;
     this.storage = null;
     this.peers = new Map();
     this.events = [];
@@ -138,7 +139,64 @@ class Suite {
 
   async init() {
     try { await this.library.init(); } catch { this.problem = 'The media index or storage could not be opened.'; }
+    this.applyRoster();
     await this.lighting.init();
+  }
+
+  activeMembers() {
+    const excluded = this.library.state.excluded;
+    return this.members.filter((id) => id === this.id || !Array.isArray(excluded) || !excluded.includes(id));
+  }
+
+  applyRoster() {
+    this.library.members = this.status?.role === 'standalone' ? [this.id] : this.activeMembers();
+  }
+
+  async setMember(id, included) {
+    this.ensureLeader();
+    if (typeof included !== 'boolean') throw new RequestError(400, 'Choose whether to include this player.');
+    if (id === this.id || !this.members.includes(id) || !digestPattern.test(this.exchange.clients?.[id])) {
+      throw new RequestError(400, 'Choose a provisioned follower in this installation.');
+    }
+    if (included === this.activeMembers().includes(id)) return this.snapshot().players;
+    if (this.transfers) throw new RequestError(409, 'Wait for the current transfer.');
+    const peer = this.peers.get(id);
+    if (!included && peer && performance.now() - peer.seen < onlineMs && peer.status.controlversion !== 1) {
+      throw new RequestError(409, `Update Player ${id} before removing it from the active group.`);
+    }
+    const playback = this.playback || this.status;
+    if (included && playback.source === 'group' && ['playing', 'starting', 'paused'].includes(playback.state)) {
+      throw new RequestError(409, 'Stop the current library revision before adding a group member.');
+    }
+    const excluded = new Set(this.members.filter((member) => !this.activeMembers().includes(member)));
+    if (included) excluded.delete(id);
+    else excluded.add(id);
+    await this.library.setExcluded([...excluded].sort(), this.members.filter((member) => !excluded.has(member)));
+    this.applyRoster();
+    this.note(`${included ? 'Added' : 'Removed'} Player ${id} ${included ? 'to' : 'from'} the group`);
+    return this.snapshot().players;
+  }
+
+  receivePlayback(raw) {
+    if (typeof raw !== 'string' || raw.length > 8192) return;
+    try {
+      const sample = JSON.parse(raw);
+      if (typeof sample.state === 'string') this.playback = sample;
+    } catch { /* Keep the previous complete sample. */ }
+  }
+
+  transportPeers(playback) {
+    return this.snapshot().players.filter(({ id, member, connection, status }) => id !== this.id && member &&
+      (connection !== 'online' || status.controlversion !== 1 || status.group !== this.status.group ||
+       status.domain !== this.status.domain || status.leader !== this.id || status.output !== this.status.output ||
+       status.source !== playback.source || status.revision !== playback.revision || status.state !== playback.state));
+  }
+
+  playbackStatus() {
+    const playback = this.playback || this.status;
+    if (!playback) return null;
+    const waiting = playback.synced && playback.pausable ? this.transportPeers(playback) : [];
+    return { ...playback, pausable: Boolean(playback.pausable && !waiting.length), waitingForTransport: waiting.map(({ id }) => id) };
   }
 
   note(event) {
@@ -151,7 +209,11 @@ class Suite {
     try { reply = await this.native(action, { data: JSON.stringify(body) }); }
     catch { throw new RequestError(503, 'The native player is busy or starting. Try again.'); }
     if (reply.status) {
-      try { this.status = JSON.parse(reply.status); } catch { throw new RequestError(502, 'The player returned invalid status.'); }
+      try {
+        this.status = JSON.parse(reply.status);
+        this.applyRoster();
+        if (action !== 'status') this.receivePlayback(reply.status);
+      } catch { throw new RequestError(502, 'The player returned invalid status.'); }
     }
     if (reply.ok !== 'yes') throw new RequestError(409, reply.error || 'The native player rejected the request.');
     return reply;
@@ -163,26 +225,28 @@ class Suite {
     if (this.status?.role === 'follower') void this.follower.pulse(this.status);
     if (this.status?.role === 'leader' && this.status.waiting && this.status.display) {
       const pending = this.unready(this.status.revision);
-      if (!pending.length) {
+      if (!pending.length && this.library.assignment(this.id, this.status.revision)) {
         try { await this.call('arm', { revision: this.status.revision }); } catch { /* Retry on the next status interval. */ }
       }
     }
   }
 
   unready(revision) {
-    return this.snapshot().players.filter((peer) => peer.id !== this.id &&
+    return this.snapshot().players.filter((peer) => peer.id !== this.id && peer.member &&
       (peer.connection !== 'online' || peer.ready !== revision || peer.status.domain !== this.status.domain ||
        peer.status.group !== this.status.group || peer.status.leader !== this.id || peer.status.output !== this.status.output));
   }
 
   snapshot() {
     const native = this.status;
+    const active = this.activeMembers();
     const players = this.members.map((id) => {
-      if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native };
+      if (id === this.id) return { id, ip: this.host, connection: native ? 'local' : 'starting', status: native, member: true };
       const peer = this.peers.get(id);
       const recent = peer && performance.now() - peer.seen < onlineMs;
       return { id, ip: this.addresses[id], connection: recent ? 'online' : 'offline', lastSeen: peer?.at || null,
-        status: recent ? peer.status : null, ready: recent ? peer.ready : '', problem: recent ? peer.problem : '' };
+        status: recent ? peer.status : null, ready: recent ? peer.ready : '', problem: recent ? peer.problem : '', member: active.includes(id),
+        manageable: native?.role === 'leader' && digestPattern.test(this.exchange.clients?.[id]) };
     });
     const ptp = this.observe();
     return { native, players, storage: this.storage, problem: this.problem, ptp,
@@ -224,12 +288,20 @@ class Suite {
     const path = url.pathname;
     if (request.method === 'GET') {
       if (path === '/api/v1/status') return json(response, 200, this.snapshot());
+      if (path === '/api/v1/playback') return json(response, 200, this.playbackStatus());
       if (path === '/api/v1/players') return json(response, 200, this.snapshot().players);
       if (path === '/api/v1/content') return json(response, 200, this.library.list());
       if (path === '/api/v1/settings') return json(response, 200, { native: this.status, outputModes });
       if (path === '/api/v1/ptp') return json(response, 200, this.snapshot().ptp);
       if (path === '/api/v1/lighting') return json(response, 200, this.lighting.snapshot());
       if (path === '/api/v1/jobs/distribution') return json(response, 200, { dispatch: this.library.state.dispatch, players: this.snapshot().players });
+    }
+    const member = /^\/api\/v1\/group\/members\/([A-Z])$/.exec(path);
+    if (member && request.method === 'PUT') {
+      return json(response, 200, await this.update(request, async () => {
+        const { included } = await readJson(request);
+        return this.setMember(member[1], included);
+      }));
     }
     if (path === '/api/v1/uploads' && request.method === 'PUT') {
       this.ensureLibrary();
@@ -278,7 +350,7 @@ class Suite {
         return this.lighting.slot(slot, id, revision);
       }));
     }
-    const command = /^\/api\/v1\/(play|stop|restart|loop|blackout|source|distribute)$/.exec(path);
+    const command = /^\/api\/v1\/(play|pause|resume|seek|stop|restart|loop|blackout|source|distribute)$/.exec(path);
     if (command && request.method === 'POST') {
       const action = command[1];
       return json(response, 200, await this.update(request, async () => {
@@ -292,6 +364,19 @@ class Suite {
   }
 
   async command(action, body) {
+    if (action === 'pause' || action === 'resume' || action === 'seek') {
+      const current = this.playbackStatus();
+      if (action === 'seek') {
+        if (!current?.seekable) throw new RequestError(409, 'Play a local MP4 to use the playhead.');
+        if (!Number.isInteger(body.positionMs) || body.positionMs < 0 || body.positionMs >= current.durationms) {
+          throw new RequestError(400, 'Seek to a position inside the current clip.');
+        }
+        return this.call(action, { positionms: body.positionMs });
+      }
+      if (current?.waitingForTransport.length) throw new RequestError(409, `Waiting for updated players in the same playback state: ${current.waitingForTransport.join(', ')}.`);
+      if (!current?.pausable) throw new RequestError(409, 'Play an MP4 to use Pause and Resume.');
+      return this.call(action);
+    }
     if (action === 'distribute') {
       this.ensureLeader();
       if (this.transfers) throw new RequestError(409, 'Wait for the current transfer.');
@@ -303,7 +388,7 @@ class Suite {
       return this.call(action, { type: body.type, url: sourceUrl(body.url, body.type) });
     }
     if (action === 'play') {
-      if (body.id === 'presentation') return this.call(action, { type: 'built-in' });
+      if (body.id === 'presentation') return this.call(action, { type: body.preview === true ? 'built-in-local' : 'built-in' });
       this.ensureLibrary();
       const { set, stored } = this.library.get(body.id, body.revision);
       if (body.preview === true || this.status.role === 'standalone') {
@@ -311,7 +396,7 @@ class Suite {
         if (!asset) throw new RequestError(409, 'Upload a verified clip for this player first.');
         return this.call(action, { type: this.status.role === 'standalone' ? 'local' : 'preview', asset: asset.digest, name: set.name });
       }
-      if (!stored || this.library.state.dispatch?.revision !== stored.revision) throw new RequestError(409, 'Distribute this verified revision first.');
+      if (!this.library.covers(stored) || this.library.state.dispatch?.revision !== stored.revision) throw new RequestError(409, 'Distribute a verified revision for every current group member first.');
       const pending = this.unready(stored.revision);
       if (pending.length) throw new RequestError(409, `Waiting for matching settings and verified media on ${pending.map(({ id }) => `Player ${id}`).join(', ')}.`);
       return this.call(action, { type: 'group', asset: stored.files[this.id].digest, revision: stored.revision, name: set.name });
@@ -338,7 +423,8 @@ class Suite {
       const ready = idPattern.test(body.ready) ? body.ready : '';
       this.peers.set(player, { status: native, ready, problem: String(body.problem || '').slice(0, 160), seen: performance.now(), at: new Date().toISOString() });
       const matches = native.domain === this.status.domain && native.group === this.status.group;
-      return json(response, 200, { assignment: matches ? this.library.assignment(player) : null });
+      const admitted = matches && this.activeMembers().includes(player);
+      return json(response, 200, { admitted, assignment: admitted ? this.library.assignment(player) : null });
     }
     if (match[3] && request.method === 'GET') {
       const assignment = this.library.assignment(player, match[3]);

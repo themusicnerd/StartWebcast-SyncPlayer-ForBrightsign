@@ -77,11 +77,40 @@ test('blocks an unprepared native group and selects local MP4 in standalone', as
     const id = 'a'.repeat(24);
     const revision = 'b'.repeat(24);
     const digest = 'c'.repeat(64);
-    suite.library.state = { dispatch: { id, revision }, sets: { [id]: { name: 'Clip', draft: { A: { digest } }, revisions: [{ revision, files: { A: { digest } } }] } } };
+    suite.library.state = { dispatch: { id, revision }, sets: { [id]: { name: 'Clip', draft: { A: { digest } }, revisions: [{ revision, files: { A: { digest }, B: { digest } } }] } } };
     suite.status = { role: 'leader', playerid: 'A', domain: 15, group: 'wall', output: '3840x2160x50p' };
     await assert.rejects(suite.command('play', { id, revision }), /Waiting for.*Player B/);
     suite.status.role = 'standalone';
     await suite.command('play', { id });
     assert.deepEqual(sent, { action: 'play', body: { type: 'local', asset: digest, name: 'Clip' } });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('persists membership, protects the leader and gates synchronised pause and local seeks', async () => {
+  const config = { card_player_id: 'A', players: { '127.0.0.1': 'A', '127.0.0.2': 'B' } };
+  const root = await fs.mkdtemp(join(tmpdir(), 'syncplayer-roster-'));
+  const actions = [];
+  const suite = new Suite({ config, host: '127.0.0.1', root, watch: null,
+    native: async (action, message) => { actions.push([action, JSON.parse(message.data)]); return { ok: 'yes' }; },
+    exchange: { clients: { B: 'a'.repeat(64) } } });
+  try {
+    await suite.init();
+    suite.status = { role: 'leader', playerid: 'A', source: 'built-in', state: 'playing', group: 'wall', domain: 15, output: '3840x2160x50p' };
+    suite.receivePlayback(JSON.stringify({ source: 'built-in', state: 'playing', revision: '', synced: true, pausable: true, seekable: false, durationms: 30000 }));
+    await assert.rejects(suite.command('pause', {}), /Waiting for updated players/);
+    await assert.rejects(suite.command('seek', { positionMs: 9000 }), /Play a local MP4/);
+    await assert.rejects(suite.setMember('A', false), /provisioned follower/);
+    await suite.setMember('B', false);
+    assert.deepEqual(suite.activeMembers(), ['A']);
+    assert.equal(suite.snapshot().players[1].member, false);
+    await suite.command('pause', {});
+    suite.receivePlayback(JSON.stringify({ source: 'built-in-local', state: 'paused', synced: false, pausable: true, seekable: true, durationms: 30000 }));
+    await suite.command('seek', { positionMs: 9000 });
+    await assert.rejects(suite.command('seek', { positionMs: 30000 }), /inside the current clip/);
+    assert.deepEqual(actions, [['pause', {}], ['seek', { positionms: 9000 }]]);
+    const saved = JSON.parse(await fs.readFile(join(root, 'index.json'), 'utf8'));
+    assert.deepEqual(saved.excluded, ['B']);
+    await suite.setMember('B', true);
+    assert.deepEqual(suite.activeMembers(), ['A', 'B']);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

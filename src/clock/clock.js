@@ -4,12 +4,15 @@ const $ = (selector) => document.querySelector(selector);
 const updateHeaders = { 'Content-Type': 'application/json', 'X-SyncPlayer-Request': 'control' };
 const dateFormat = new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Sydney', dateStyle: 'medium', timeStyle: 'long' });
 const inputFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Australia/Sydney', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const labels = { 'built-in': 'Built-in presentation', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local preview' };
+const labels = { 'built-in': 'Built-in presentation', 'built-in-local': 'Local presentation', leader: 'Leader', follower: 'Follower', standalone: 'Standalone', srt: 'SRT feed', web: 'Webpage', group: 'Group MP4', local: 'Local MP4', preview: 'Local preview' };
 let dashboard;
 let library = [];
 let sample;
 let busy = false;
 let toastTimer;
+let playback;
+let readingPlayback = false;
+let scrubbing = false;
 
 function showMessage(message, error = false) {
   const toast = $('#feedback');
@@ -88,25 +91,79 @@ function drawWindow(rect) {
   layer.style.height = `${rect.height}%`;
 }
 
+function renderPlayback(current) {
+  if (!current) return;
+  playback = current;
+  $('#playback-state').textContent = current.pending ? 'Restart pending' : current.state;
+  $('#playback-state').dataset.state = current.state;
+  $('#playback-error').textContent = current.error || dashboard?.problem || '';
+  $('#source-name').textContent = current.name;
+  $('#pause').textContent = current.state === 'paused' ? 'Resume' : 'Pause';
+  $('#pause').disabled = !current.pausable;
+  const slider = $('#position');
+  slider.disabled = !current.seekable;
+  if (scrubbing && current.seekable) return;
+  const total = Math.max(0, current.durationms || 0);
+  const position = Math.max(0, current.positionms || 0);
+  slider.max = Math.max(1, total - 1);
+  slider.value = Math.min(position, Number(slider.max));
+  slider.setAttribute('aria-valuetext', `${duration(position / 1000)} of ${duration(total / 1000)}`);
+  $('#position-label').textContent = total > 0 ? `${duration(position / 1000)} / ${duration(total / 1000)}` : (labels[current.source] || '—');
+  $('#transport-help').textContent = current.waitingForTransport?.length
+    ? `Group Pause and Resume wait for Players ${current.waitingForTransport.join(', ')}. Play locally for immediate control.`
+    : current.synced && total > 0 ? 'Use a local MP4 to drag the playhead.' : '';
+}
+
+async function refreshPlayback() {
+  if (readingPlayback || busy || document.hidden) return;
+  readingPlayback = true;
+  try { renderPlayback(await api('playback')); } catch { /* The next sample will recover automatically. */ }
+  finally { readingPlayback = false; }
+}
+
+function renderMembership(players, native) {
+  const group = $('#group-members');
+  const snapshot = JSON.stringify(players.map(({ id, member, manageable }) => [id, member, manageable]));
+  if (group.dataset.snapshot === snapshot) return;
+  group.dataset.snapshot = snapshot;
+  const focused = document.activeElement?.dataset?.member;
+  const rows = players.map((player) => {
+    const row = item('div', undefined, 'membership-row');
+    const text = item('div');
+    text.append(item('strong', `Player ${player.id}`), item('p', !player.member ? 'Outside this group' : player.id === native?.playerid ? 'Local player' : 'Group member'));
+    row.append(text);
+    if (player.manageable) {
+      const included = !player.member;
+      const button = action(included ? 'Add to group' : 'Remove from group', async () => {
+        const name = `Player ${player.id}`;
+        if (!included && !confirm(`Remove ${name} from the active playback group?`)) return;
+        await operate(() => api(`group/members/${player.id}`, 'PUT', { included }), included ? `${name} added to the group.` : `${name} removed from the group.`);
+        await refresh();
+        await refreshLibrary();
+      });
+      button.dataset.member = player.id;
+      button.setAttribute('aria-label', `${included ? 'Add' : 'Remove'} Player ${player.id} ${included ? 'to' : 'from'} the group`);
+      row.append(button);
+    }
+    return row;
+  });
+  group.replaceChildren(...rows);
+  if (focused) group.querySelector(`[data-member="${focused}"]`)?.focus();
+}
+
 function renderStatus() {
-  const { native, players, storage, events, ptp, dispatch, problem, lighting } = dashboard;
+  const { native, players, storage, events, ptp, dispatch, lighting } = dashboard;
   $('#connection').textContent = native ? `Player ${native.playerid} · ${labels[native.role]}` : 'Native player starting';
   $('#connection').dataset.state = 'online';
   if (native) {
     $('#identity').textContent = `${native.model} · BrightSignOS ${native.firmware} · SyncPlayer ${native.version}`;
-    $('#playback-state').textContent = native.pending ? 'Restart pending' : native.state;
-    $('#playback-state').dataset.state = native.state;
-    $('#playback-error').textContent = native.error || problem || '';
-    $('#source-name').textContent = native.name;
-    $('#position').max = Math.max(1, native.durationms || 1);
-    $('#position').value = Math.max(0, native.positionms || 0);
-    $('#position-label').textContent = native.durationms > 0 ? `${duration(native.positionms / 1000)} / ${duration(native.durationms / 1000)}` : (labels[native.source] || '—');
+    if (!playback) renderPlayback(native);
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = native.role === 'follower' ? 'Follower audio is muted. The leader supplies HDMI audio.' : 'Volume controls the native video and SRT audio.';
     $('#layout-label').textContent = `${labels[native.source] || 'Lower layer'}${native.overlay ? ' + HTML5 overlay' : ''}`;
     $('#overlay-state').textContent = native.overlaystate;
     drawWindow(native.rect);
-    for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command === 'built-in';
+    for (const button of document.querySelectorAll('[data-command]')) button.disabled = native.role === 'follower' && button.dataset.command.startsWith('built-in');
     $('#upload').hidden = native.role === 'follower';
     fill('#av-form', { output: native.requestedoutput, volume: native.volume, muted: native.muted });
     $('#volume-label').textContent = `${$('#av-form').elements.volume.value}%`;
@@ -127,8 +184,12 @@ function renderStatus() {
     const network = native.ntpresult;
     $('#ntp-status').textContent = network?.failure_reason ? `Last attempt: ${network.failure_reason}` : network?.success_timestamp ? 'The player reports a successful network update.' : 'An empty server disables network time. An interval of 0 uses the default.';
   }
-  const connected = players.filter(({ connection }) => ['local', 'online'].includes(connection)).length;
-  $('#sync-summary').textContent = native?.role === 'standalone' ? 'Standalone' : `${connected}/${players.length} reporting · Sync unmeasured`;
+  const active = players.filter(({ member }) => member);
+  const suffixes = (native?.role === 'standalone' ? [native.playerid] : active.map(({ id }) => id)).map((id) => `Welcome_${id}.mp4`);
+  if (suffixes.length) $('#drop > span').textContent = `Use names like ${suffixes.join(', ')}.`;
+  const connected = active.filter(({ connection }) => ['local', 'online'].includes(connection)).length;
+  $('#sync-summary').textContent = native?.role === 'standalone' ? 'Standalone' : `${connected}/${active.length} reporting · Sync unmeasured`;
+  renderMembership(players, native);
   const list = players.map((player) => {
     const info = player.status;
     const card = item('div', undefined, 'player');
@@ -147,7 +208,7 @@ function renderStatus() {
   $('#storage').textContent = storage ? `SD card · ${bytes(storage.freeBytes)} free of ${bytes(storage.sizeBytes)}` : 'SD storage unavailable';
   $('#distribution').hidden = !dispatch;
   if (dispatch) {
-    const states = players.filter((player) => player.id !== native?.playerid).map((player) => `${player.id} ${player.ready === dispatch.revision ? 'verified' : player.connection === 'offline' ? 'offline' : 'pending'}`);
+    const states = active.filter((player) => player.id !== native?.playerid).map((player) => `${player.id} ${player.ready === dispatch.revision ? 'verified' : player.connection === 'offline' ? 'offline' : 'pending'}`);
     $('#distribution-label').textContent = `Distribution ${dispatch.revision.slice(0, 8)} · ${states.join(' · ')}`;
   }
   $('#events').replaceChildren(...(events.length ? events.map(({ at, event }) => item('li', `${dateFormat.format(new Date(at))} · ${event}`)) : [item('li', 'No operator activity since this player started.')]));
@@ -226,9 +287,9 @@ async function refreshLibrary() {
 }
 
 async function command(name, data = {}) {
-  const updates = { play: 'Playback request accepted.', stop: 'Playback stopped.', restart: 'Restart requested.', loop: 'Loop preference updated.', blackout: 'Blackout applied.', source: 'Source requested. Check Playback for the load result.', distribute: data.clear ? 'Distribution cleared.' : 'Distribution queued.' };
+  const updates = { play: 'Playback request accepted.', pause: 'Pause accepted.', resume: 'Resume accepted.', stop: 'Playback stopped.', restart: 'Restart requested.', loop: 'Loop preference updated.', blackout: 'Blackout applied.', source: 'Source requested. Check Playback for the load result.', distribute: data.clear ? 'Distribution cleared.' : 'Distribution queued.' };
   await operate(() => api(name, 'POST', data), updates[name]);
-  await refresh();
+  await Promise.all([refresh(), refreshPlayback()]);
 }
 
 async function remove(set, revision) {
@@ -309,8 +370,23 @@ $('#refresh').addEventListener('click', async () => { await refresh(); await ref
 for (const button of document.querySelectorAll('[data-command]')) button.addEventListener('click', () => {
   const name = button.dataset.command;
   if (name === 'built-in') command('play', { id: 'presentation' });
+  else if (name === 'built-in-local') command('play', { id: 'presentation', preview: true });
   else command(name);
 });
+$('#pause').addEventListener('click', () => command(playback?.state === 'paused' ? 'resume' : 'pause'));
+$('#position').addEventListener('input', (event) => {
+  if (!playback?.seekable) return;
+  scrubbing = true;
+  const position = Number(event.target.value);
+  $('#position-label').textContent = `${duration(position / 1000)} / ${duration(playback.durationms / 1000)}`;
+  event.target.setAttribute('aria-valuetext', $('#position-label').textContent);
+});
+$('#position').addEventListener('change', async (event) => {
+  const positionMs = Math.round(Number(event.target.value));
+  try { await operate(() => api('seek', 'POST', { positionMs })); }
+  finally { scrubbing = false; await refreshPlayback(); }
+});
+$('#position').addEventListener('pointercancel', () => { scrubbing = false; void refreshPlayback(); });
 $('#loop').addEventListener('change', (event) => command('loop', { enabled: event.target.checked }));
 $('#clear-distribution').addEventListener('click', () => command('distribute', { clear: true }));
 form('#upload', () => upload([...$('#media-files').files]));
@@ -365,7 +441,47 @@ form('#slot-form', async (fields, element) => {
 $('#computer').addEventListener('click', () => clock({ utc: new Date().toISOString() }));
 form('#manual', () => clock({ sydney: $('#sydney').value }));
 setInterval(showTime, 1000);
+setInterval(refreshPlayback, 1000);
 setInterval(refresh, 5000);
 setInterval(() => { if (!sample) void clock(); }, 10000);
 refresh().then(refreshLibrary);
+refreshPlayback();
 clock();
+
+const masthead = $('.masthead');
+const navigation = [...masthead.querySelectorAll('nav a')];
+let activeAnchor = location.hash || '#overview';
+let scrollUpdate = 0;
+
+function selectAnchor(anchor) {
+  if (!navigation.some((link) => link.hash === anchor)) return;
+  activeAnchor = anchor;
+  for (const link of navigation) {
+    if (link.hash === anchor) link.setAttribute('aria-current', 'location');
+    else link.removeAttribute('aria-current');
+  }
+}
+
+function updateNavigation() {
+  scrollUpdate = 0;
+  const threshold = masthead.getBoundingClientRect().bottom + 24;
+  const sections = navigation.map((link) => ({ hash: link.hash, top: document.querySelector(link.hash).getBoundingClientRect().top }));
+  const passed = sections.filter(({ top }) => top <= threshold);
+  const lastTop = Math.max(...passed.map(({ top }) => top));
+  const tied = passed.filter(({ top }) => Math.abs(top - lastTop) < 2);
+  const ending = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+  const preferred = sections.find(({ hash }) => hash === activeAnchor);
+  if (ending && preferred?.top >= threshold && preferred.top < window.innerHeight) return;
+  selectAnchor(tied.find(({ hash }) => hash === activeAnchor)?.hash || tied[0]?.hash || '#overview');
+}
+
+const sizeMasthead = () => {
+  document.documentElement.style.setProperty('--masthead-height', `${Math.ceil(masthead.getBoundingClientRect().height)}px`);
+  updateNavigation();
+};
+new ResizeObserver(sizeMasthead).observe(masthead);
+for (const link of navigation) link.addEventListener('click', () => selectAnchor(link.hash));
+window.addEventListener('hashchange', () => selectAnchor(location.hash));
+window.addEventListener('scroll', () => { if (!scrollUpdate) scrollUpdate = requestAnimationFrame(updateNavigation); }, { passive: true });
+selectAnchor(activeAnchor);
+sizeMasthead();

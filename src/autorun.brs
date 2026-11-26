@@ -243,6 +243,8 @@ Function NewPanel(config As Object, device As Object, mode As Object, network As
     RestoreSelection(panel)
     panel.waiting = panel.role = "leader" And panel.source = "group" And panel.settings.intent = "auto"
     panel.colour = {brightness: 0, hue: 0, saturation: 0}
+    panel.memberUntil = 0
+    panel.telemetryAt = 0
     Return panel
 End Function
 
@@ -256,8 +258,12 @@ Function SavePanel(panel As Object, settings As Object) As Boolean
 End Function
 
 Function PanelStatus(panel As Object) As Object
-    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: "0.2.3"}
+    data = {playerid: m.playerId, role: panel.role, leader: panel.settings.leader, group: panel.settings.group, domain: panel.settings.domain, output: panel.mode.GetMode(), requestedoutput: panel.settings.output, volume: panel.settings.volume, muted: panel.settings.muted, state: panel.state, error: panel.error, source: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name, loop: panel.settings.loop, display: panel.screens, waiting: panel.waiting And panel.warmUntil = 0, on: panel.settings.on, off: panel.settings.off, rect: panel.settings.rect, overlay: panel.settings.overlay <> "", overlaystate: panel.overlayState, ntp: panel.settings.ntp, interval: panel.settings.interval, firmware: panel.firmware, model: panel.model, serial: panel.serial, uptime: UpTime(0), pending: panel.change, version: "0.2.4"}
     data.colour = panel.colour
+    playback = PanelPlayback(panel)
+    For Each key In playback
+        data[key] = playback[key]
+    End For
     If Type(panel.settings.selection) = "roAssociativeArray" Then data.savedasset = panel.settings.selection.asset
     If panel.clock <> invalid Then
         data.clockvalid = panel.clock.IsValid()
@@ -266,11 +272,48 @@ Function PanelStatus(panel As Object) As Object
             If info <> invalid Then data.ntpresult = info
         End If
     End If
-    If panel.video <> invalid And (panel.state = "playing" Or panel.state = "starting") And panel.source <> "web" Then
-        data.positionms = panel.video.GetPlaybackPosition()
-        data.durationms = panel.video.GetDuration()
-    End If
     Return data
+End Function
+
+Function PanelGroupMedia(panel As Object) As Boolean
+    Return panel.role <> "standalone" And (panel.source = "built-in" Or panel.source = "group")
+End Function
+
+Function PanelFileMedia(panel As Object) As Boolean
+    Return panel.source <> "web" And panel.source <> "srt"
+End Function
+
+Function PanelPlayback(panel As Object) As Object
+    current = {state: panel.state, source: panel.source, name: panel.name, revision: panel.revision, error: panel.error, pending: panel.change, controlversion: 1, synced: PanelGroupMedia(panel), pausable: false, seekable: false}
+    If panel.video = invalid Or panel.source = "web" Then Return current
+    If panel.state <> "playing" And panel.state <> "paused" And panel.state <> "starting" Then Return current
+    current.positionms = panel.video.GetPlaybackPosition()
+    current.durationms = panel.video.GetDuration()
+    current.pausable = panel.role <> "follower" And PanelFileMedia(panel) And (panel.state = "playing" Or panel.state = "paused")
+    current.seekable = current.pausable And not current.synced And current.durationms > 0
+    Return current
+End Function
+
+Function PanelTransport(panel As Object, action As String, stamp As String) As String
+    If not PanelFileMedia(panel) Then Return "Play an MP4 to use this transport control."
+    wanted = "paused"
+    previous = "playing"
+    If action = "resume" Then
+        wanted = "playing"
+        previous = "paused"
+    End If
+    If panel.state = wanted Then Return ""
+    If panel.state <> previous Then Return "The selected clip is not ready for that command."
+    params = {}
+    If stamp <> "" Then params.SyncIsoTimeStamp = stamp
+    If action = "pause" Then
+        accepted = panel.video.Pause(params)
+    Else
+        accepted = panel.video.Resume(params)
+    End If
+    If not accepted Then Return "The native player rejected the transport command."
+    panel.state = wanted
+    Return ""
 End Function
 
 Function PanelBounds(panel As Object, bounds As Object) As Object
@@ -490,6 +533,11 @@ End Function
 Sub PanelTick(panel As Object)
     PanelRestart(panel)
     PanelHtmlFeedback(panel)
+    now = UpTime(0)
+    If m.clockWeb <> invalid And now >= panel.telemetryAt Then
+        panel.telemetryAt = now + 1
+        m.clockWeb.PostJsMessage({protocol: "start-syncplayer-playback-v1", status: FormatJson(PanelPlayback(panel))})
+    End If
     If panel.state = "starting" And panel.loadAt > 0 And UpTime(0) > panel.loadAt + 20 Then
         panel.state = "error"
         panel.error = "The source did not report playback within 20 seconds."
@@ -531,9 +579,19 @@ Sub PanelFollow(panel As Object, event As Object)
     syncId = event.GetId()
     stamp = event.GetIsoTimestamp()
     If event.GetDomain() <> panel.settings.group Or Len(syncId) > 64 Or Len(stamp) = 0 Or Len(stamp) > 64 Then Return
+    If panel.scheduled And UpTime(0) >= panel.memberUntil Then Return
     If syncId = panel.syncId And stamp = panel.syncTime Then Return
     panel.syncId = syncId
     panel.syncTime = stamp
+    If Left(syncId, 12) = "suite-pause-" Or Left(syncId, 13) = "suite-resume-" Then
+        If PanelGroupMedia(panel) Then
+            action = "pause"
+            If Left(syncId, 13) = "suite-resume-" Then action = "resume"
+            error = PanelTransport(panel, action, stamp)
+            If error <> "" Then panel.error = error
+        End If
+        Return
+    End If
     If Left(syncId, Len(panel.baselinePrefix) + 9) = panel.baselinePrefix + "-standby-" Then
         panel.screens = false
         SetDisplayState(panel.video, panel.cec, false)
@@ -694,9 +752,46 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         Return "The native file probe rejected this media."
     Else If action = "settings" Then
         Return PanelSet(panel, body)
+    Else If action = "membership" Then
+        If panel.role <> "follower" Or not BooleanValue(body.admitted) Then Return "Invalid follower membership."
+        If body.admitted Then
+            panel.memberUntil = UpTime(0) + 16
+        Else
+            panel.memberUntil = 0
+            If panel.ready And PanelGroupMedia(panel) And panel.screens Then
+                panel.screens = false
+                SetDisplayState(panel.video, panel.cec, false)
+                StopPanel(panel, true)
+                panel.state = "outside group"
+            End If
+        End If
+        Return ""
     End If
     If not panel.ready Then Return "Native playback is still starting."
     If panel.change <> "" Then Return "The device is about to restart."
+    If action = "pause" Or action = "resume" Then
+        playback = PanelPlayback(panel)
+        If not playback.pausable Then Return "Play an MP4 to use this transport control."
+        If action = "pause" And panel.state = "paused" Then Return ""
+        If action = "resume" And panel.state = "playing" Then Return ""
+        stamp = ""
+        If playback.synced Then
+            panel.sequence = panel.sequence + 1
+            event = panel.manager.Synchronize("suite-" + action + "-" + Mid(StrI(panel.sequence), 2), 500)
+            If event = invalid Then Return "The native player could not schedule the transport command."
+            stamp = event.GetIsoTimestamp()
+            If stamp = "" Then Return "The native transport timestamp is unavailable."
+        End If
+        Return PanelTransport(panel, action, stamp)
+    End If
+    If action = "seek" Then
+        playback = PanelPlayback(panel)
+        If not playback.seekable Then Return "Play a local MP4 to use the playhead."
+        If not WholeNumber(body.positionms) Then Return "Use a whole-number position in milliseconds."
+        If body.positionms < 0 Or body.positionms >= playback.durationms Then Return "Seek to a position inside the current clip."
+        If not panel.video.Seek(body.positionms) Then Return "The native player rejected the seek."
+        Return ""
+    End If
     If action = "colour" Then
         For Each key In ["brightness", "hue", "saturation"]
             If not WholeNumber(body[key]) Then Return "Video colour values must be whole numbers."
@@ -744,29 +839,31 @@ Function PanelCommand(panel As Object, action As String, body As Object) As Stri
         panel.url = body.url
     Else If action = "play" Then
         If panel.role = "follower" Then Return "The configured leader controls group playback."
-        If body.type <> "built-in" And body.type <> "group" And body.type <> "preview" And body.type <> "local" Then Return "Unsupported source."
+        If body.type <> "built-in" And body.type <> "built-in-local" And body.type <> "group" And body.type <> "preview" And body.type <> "local" Then Return "Unsupported source."
         If body.type = "group" And (not SafeHex(body.revision, 24) Or panel.role <> "leader") Then Return "Invalid group revision."
-        If body.type <> "built-in" And not VerifiedAsset(panel, body.asset) Then Return "The native file probe rejected this media."
+        builtIn = body.type = "built-in" Or body.type = "built-in-local"
+        ephemeral = body.type = "preview" Or body.type = "built-in-local"
+        If not builtIn And not VerifiedAsset(panel, body.asset) Then Return "The native file probe rejected this media."
         panel.waiting = false
-        If body.type = "preview" Or body.type = "local" Then PanelSignal(panel, "suite-stop-")
+        If ephemeral Or body.type = "local" Then PanelSignal(panel, "suite-stop-")
         panel.source = body.type
         panel.asset = ""
         panel.revision = ""
         panel.url = ""
         panel.name = "Built-in presentation"
-        If body.type <> "built-in" Then
+        If not builtIn Then
             panel.asset = body.asset
             panel.name = body.name
             If body.type = "group" Then panel.revision = body.revision
         End If
-        If body.type <> "preview" Then panel.settings.selection = {kind: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name}
+        If not ephemeral Then panel.settings.selection = {kind: panel.source, asset: panel.asset, revision: panel.revision, name: panel.name}
     Else If action <> "restart" Or panel.waiting Or (panel.role = "follower" And panel.source <> "srt" And panel.source <> "web") Then
         Return "This player cannot perform that command."
     End If
     panel.settings.intent = "auto"
     panel.warmUntil = 0
     If not StartPanel(panel) Then Return panel.error
-    If (action = "play" And body.type <> "preview") Or action = "restart" Then
+    If (action = "play" And body.type <> "preview" And body.type <> "built-in-local") Or action = "restart" Then
         If not SavePanel(panel, panel.settings) Then Return "Playback started but the selection could not be saved."
     End If
     Return ""
@@ -1040,7 +1137,7 @@ End Function
 
 Sub LogEvent(eventName As String, fields As Object)
     fields.app = "Start SyncPlayer"
-    fields.version = "0.2.3"
+    fields.version = "0.2.4"
     fields.event = eventName
     fields.player_id = m.playerId
     line = FormatJson(fields)
