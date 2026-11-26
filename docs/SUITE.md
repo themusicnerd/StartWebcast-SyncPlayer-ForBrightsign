@@ -66,7 +66,7 @@ For RTSP, use the URL supplied by the camera or encoder, such as `rtsp://camera:
 - **Clock & Schedule** displays Sydney time, sets the hardware clock and changes the daily display wake and standby times. A large clock change can briefly restart playback. **Network Time** accepts an SNTP-compatible hostname or IPv4 address and the polling interval. The factory default is `0.au.pool.ntp.org`. Clear the hostname to disable network time. Use 0 for the vendor default interval. NTP maintains wall clock time. Native PTP supplies group playback timing.
 
 
-Use the rotate button on a player preview to turn the preview clockwise by 90°. The group saves the angle by player, including when you rearrange the grid.
+Use the rotate button on a player preview to turn the preview clockwise by 90°. The group saves the angle by player, including when you rearrange the grid. A quarter-turn displays the preview in a 9:16 frame.
 
 ### Display Control
 
@@ -74,6 +74,10 @@ Open **Device Settings → Display Control** on the player connected to the disp
 
 - **Samsung IP Control** sends both commands to the TV over the LAN. **CEC Wake / Samsung IP Standby** uses HDMI to wake the TV and the LAN to turn it off. Use the hybrid mode if the Samsung IP service goes offline in standby.
 - On a Samsung TV, open **All Settings → Connections → Network → Expert Settings**. Enable **Power On with Mobile** and **IP Remote**. Enter the TV’s address in SyncPlayer and save. Use port 1516 on current models. Select **Pair Samsung TV** with the TV awake and approve the prompt on the TV. SyncPlayer saves the token and the TV certificate fingerprint locally. Pair again if the certificate changes. Test both buttons before depending on the schedule. [Samsung Consumer IP Control Worksheet](https://image-us.samsung.com/SamsungUS/samsungbusiness/tv-ci-resources/Samsung-IP-Control.pdf)
+- **Sony BRAVIA Simple IP** sends discrete power commands to compatible BRAVIA displays. Enable Simple IP Control. The default is TCP 20060.
+- **TCL / Hisense Roku TV** sends standby through Roku ECP on port 8060 and uses HDMI-CEC to wake. Enable Control by Mobile Apps on the Roku TV. Other TCL and Hisense platforms can use CEC or a model-specific custom TCP or UDP profile.
+- **Sharp AQUOS IP** sends discrete power commands to compatible AQUOS models that allow IP control with no login credentials. The default is TCP 10002. Enable IP wake on the display if supported.
+- **PJLink** sends power commands to compatible NEC, Sharp, Panasonic and other displays or projectors. The default is TCP 4352. SyncPlayer supports the no-password and legacy MD5 authentication modes. Test wake from standby on the display.
 - **Custom TCP** and **Custom UDP** use a fixed private IPv4 address and port. Set the two payloads in **Power Commands**. **Hex** sends exact bytes. Include `0D 0A` if the display protocol requires CRLF. **UTF-8 Text** sends the entered characters with no added terminator. **Send One-Off Command** uses the saved destination and accepts its own format and payload. A sent command confirms transport only. Check the actual display response.
 
 ## Lighting input
@@ -119,7 +123,7 @@ Use HTTPS Basic authentication with the same installation login. State-changing 
 | `POST /retry-stream` | Send `{}` to try the last selected SRT or RTSP stream again. |
 | `GET /display-control` | Read the active mode, pairing status and last command result. |
 | `PUT /preview-rotation` | Send `{"player":"B","rotation":90}` to save a local preview angle across the group. Output rotation is a separate setting. |
-| `PUT /display-control` | Save `{"mode":"cec"}`, `{"mode":"hybrid","address":"192.168.1.50","port":1516}`, or a `samsung`, `tcp`, or `udp` profile. For TCP and UDP, add `format` (`hex` or `text`), `on` and `standby` payload strings. |
+| `PUT /display-control` | Save `{"mode":"cec"}`, `{"mode":"hybrid","address":"192.168.1.50","port":1516}`, or a `samsung`, `sony`, `roku`, `sharp`, `pjlink`, `tcp`, or `udp` profile. Use `password` for PJLink authentication. Omit it to keep the saved password for the same destination or send an empty string to clear it. For TCP and UDP, add `format` (`hex` or `text`), `on` and `standby` payload strings. |
 | `POST /display-control/pair` | Send `{}` and approve the Samsung TV prompt. |
 | `POST /display-power` | Send `{"power":"on"}` or `{"power":"standby"}`. Add `"via":"cec"` for a one-time CEC command. |
 | `POST /display-command` | Send a one-off payload to the saved TCP or UDP destination. Example `{"format":"hex","payload":"50 4F 46 46 0D 0A"}`. |

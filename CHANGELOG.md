@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.24
+
+- Accept the Samsung Frame's string response ID during IP pairing.
+- Add display setup help, Sony BRAVIA, Roku TV, Sharp AQUOS and PJLink presets, and portrait preview frames.
+
 ## 0.2.23
 
 - Add 90° preview rotation saved per player across the group.

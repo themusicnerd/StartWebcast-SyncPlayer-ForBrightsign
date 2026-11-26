@@ -279,7 +279,7 @@ function renderStatus() {
     $('#loop').checked = native.loop;
     $('#audio-owner').textContent = 'Use HDMI Audio and Volume to Control Native Video and SRT Audio on This Player.';
     const display = dashboard.displayControl || { mode: 'cec' };
-    $('#cec-on').disabled = ['cec', 'hybrid'].includes(display.mode) && !native.cecavailable ||
+    $('#cec-on').disabled = ['cec', 'hybrid', 'roku'].includes(display.mode) && !native.cecavailable ||
       display.mode === 'samsung' && !display.paired;
     $('#cec-standby').disabled = display.mode === 'cec' && !native.cecavailable ||
       ['samsung', 'hybrid'].includes(display.mode) && !display.paired;
@@ -780,14 +780,30 @@ form('#av-form', (fields, element) => {
   const restart = fields.output.value !== dashboard?.native?.output || rotation !== (dashboard?.native?.rotation ?? 0);
   saveSettings(element, { output: fields.output.value, rotation, volume: Number(fields.volume.value), muted: fields.muted.checked, audioenabled: fields.audioenabled.checked, cecremote: fields.cecremote.checked }, restart ? 'Apply the HDMI Output Change and Restart Playback?' : undefined);
 });
+const displayPresetHelp = {
+  sony: 'Enable Simple IP Control on a compatible Sony BRAVIA. Use TCP port 20060.',
+  roku: 'Use a Roku TV from TCL, Hisense or another brand. Enable Control by Mobile Apps under System → Advanced System Settings. Wake uses HDMI-CEC. Standby uses Roku IP control on port 8060.',
+  sharp: 'Enable AQUOS Remote Control on a compatible Sharp TV without IP login credentials. Use its configured port, typically 10002. The TV must allow IP wake.',
+  pjlink: 'Enable PJLink on a compatible display or projector. The default is TCP port 4352. Enter the device’s PJLink password if it requires one.',
+};
+const displayDefaultPorts = { samsung: 1516, hybrid: 1516, sony: 20060, roku: 8060, sharp: 10002, pjlink: 4352 };
+
 function renderDisplayControl(display = dashboard?.displayControl) {
   const form = $('#display-control-form');
   const { mode, address, port } = form.elements;
   const samsung = ['samsung', 'hybrid'].includes(mode.value);
   const custom = ['tcp', 'udp'].includes(mode.value);
-  $('#display-address').hidden = !samsung && !custom;
+  const network = mode.value !== 'cec';
+  $('#display-address').hidden = !network;
+  $('#samsung-display-setup').hidden = !samsung;
+  $('#display-pjlink').hidden = mode.value !== 'pjlink';
+  $('#display-preset-help').textContent = displayPresetHelp[mode.value] || '';
+  $('#display-preset-help').hidden = !displayPresetHelp[mode.value];
+  const passwordSaved = display?.mode === 'pjlink' && display.passwordSaved && display.address === address.value && display.port === Number(port.value);
+  $('#pjlink-password-status').textContent = passwordSaved ? 'Password Saved. Leave Blank to Keep It.' : 'Leave Blank if the Display Uses No Password.';
+  form.elements.clearPassword.disabled = !passwordSaved;
   $('#display-saved-commands').hidden = !custom;
-  address.required = port.required = samsung || custom;
+  address.required = port.required = network;
   form.elements.on.required = form.elements.standby.required = custom;
   $('#display-command-form').hidden = !['tcp', 'udp'].includes(display?.mode);
   const pair = $('#display-pair');
@@ -800,14 +816,22 @@ function renderDisplayControl(display = dashboard?.displayControl) {
 $('#display-control-form').addEventListener('input', () => renderDisplayControl());
 $('#display-control-form').elements.mode.addEventListener('change', (event) => {
   const port = $('#display-control-form').elements.port;
-  if (['samsung', 'hybrid'].includes(event.target.value) && ![1515, 1516].includes(Number(port.value))) port.value = 1516;
+  port.value = event.target.value === dashboard?.displayControl?.mode ? dashboard.displayControl.port || '' : displayDefaultPorts[event.target.value] || '';
   renderDisplayControl();
 });
 form('#display-control-form', async (fields, element) => {
   const profile = { mode: fields.mode.value, address: fields.address.value.trim(), port: Number(fields.port.value),
     format: fields.format.value, on: fields.on.value, standby: fields.standby.value };
+  if (profile.mode === 'pjlink') {
+    if (fields.clearPassword.checked) profile.password = '';
+    else if (fields.password.value) profile.password = fields.password.value;
+  }
   const result = await operate(() => api('display-control', 'PUT', profile), 'Display Control Saved.', element);
-  if (result) await refresh();
+  if (result) {
+    fields.password.value = '';
+    fields.clearPassword.checked = false;
+    await refresh();
+  }
 });
 $('#display-pair').addEventListener('click', async () => {
   const button = $('#display-pair');

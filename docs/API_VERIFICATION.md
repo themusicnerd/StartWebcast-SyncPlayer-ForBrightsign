@@ -121,3 +121,9 @@ The desktop native mock covers Off, accepted and rejected `roVideoMode.SetSyncDo
 ### 0.2.23 Display Control and Preview Rotation
 
 Samsung's [Consumer IP Control Worksheet](https://image-us.samsung.com/SamsungUS/samsungbusiness/tv-ci-resources/Samsung-IP-Control.pdf) confirms IP Remote and Power On with Mobile. The Samsung Frame LS03HE product specification lists IP Control. The desktop HTTPS fixture verified the JSON-RPC pairing and power exchange and rejection of a changed TV certificate before sending the token. TCP and UDP loopback tests checked exact bytes, schedule tests checked routing, and layout tests checked preview rotation persistence and follower forwarding. Samsung IP power commands still require a test on the LS03HE television. [Samsung LS03HE specifications](https://www.samsung.com/au/lifestyle-tvs/the-frame/ls03he-55-inch-the-frame-pro-4k-vision-ai-smart-tv-qa55ls03hewxxy/#specs)
+
+### 0.2.24 Display Presets
+
+A Frame LS03HE running 1242 returned HTTP 200, a string JSON-RPC response ID of "1", and the AccessToken field after the operator selected Allow. SyncPlayer now accepts both the numeric and string form of that specific request ID.
+
+The Sony Simple IP and AQUOS presets use the vendor's documented power commands. The Roku preset uses documented ECP PowerOff and HDMI-CEC wake. PJLink uses the standard class 1 POWR command with either no authentication or the legacy challenge-response. [Sony Simple IP](https://pro-bravia.sony.net/remote-display-control/simple-ip-control/) · [Roku ECP](https://developer.roku.com/dev/docs/external-control-api) · [Sharp AQUOS manual](https://files.sharpusa.com/Downloads/ForHome/HomeEntertainment/LCDTVs/Manuals/mon_man_LC70LE847U_LC60LE847U_LC70LE745U_LC60LE745U_LC80LE844U.pdf) · [PJLink specification](https://pjlink.jbmia.or.jp/english/data/5-1_PJLink_eng_20131210.pdf)

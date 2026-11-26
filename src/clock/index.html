@@ -129,9 +129,25 @@
         <article class="panel">
           <form id="display-control-form" class="stack">
             <h3>Display Control</h3>
-            <label>Power Control Method<select name="mode"><option value="cec">HDMI-CEC</option><option value="samsung">Samsung IP Control</option><option value="hybrid">CEC Wake / Samsung IP Standby</option><option value="tcp">Custom TCP</option><option value="udp">Custom UDP</option></select></label>
+            <label>Power Control Method<select name="mode"><option value="cec">HDMI-CEC</option><option value="samsung">Samsung IP Control</option><option value="hybrid">CEC Wake / Samsung IP Standby</option><option value="sony">Sony BRAVIA Simple IP</option><option value="roku">TCL / Hisense Roku TV</option><option value="sharp">Sharp AQUOS IP</option><option value="pjlink">PJLink (NEC, Sharp, Panasonic and Others)</option><option value="tcp">Custom TCP</option><option value="udp">Custom UDP</option></select></label>
             <fieldset class="stack" id="display-address" hidden><legend>Display Destination</legend>
               <div class="form-row"><label class="grow">Display IP Address<input name="address" inputmode="decimal" placeholder="192.168.1.50"></label><label>Port<input name="port" type="number" min="1" max="65535" placeholder="1516"></label></div>
+            </fieldset>
+            <div id="samsung-display-setup" hidden>
+              <ol>
+                <li>On the TV, open <strong>All Settings → Connections → Network → Expert Settings</strong>.</li>
+                <li>Enable <strong>Power On with Mobile</strong> and <strong>IP Remote</strong>.</li>
+                <li>Enter the TV’s own IP address and port <strong>1516</strong>. Select <strong>Save Display Control</strong>.</li>
+                <li>With the TV showing its HDMI input, select <strong>Pair Samsung TV</strong>. On the TV, select <strong>Allow</strong>.</li>
+                <li>Test <strong>Standby</strong> and <strong>Power On</strong> in the top bar.</li>
+              </ol>
+              <p class="muted">Use <strong>CEC Wake / Samsung IP Standby</strong> if the TV loses its network connection in standby.</p>
+            </div>
+            <p id="display-preset-help" class="muted" hidden></p>
+            <fieldset class="stack" id="display-pjlink" hidden><legend>PJLink Authentication</legend>
+              <label>PJLink Password<input name="password" type="password" autocomplete="new-password" maxlength="32" pattern="[A-Za-z0-9]{1,32}"></label>
+              <label class="check"><input name="clearPassword" type="checkbox"> Clear Saved Password</label>
+              <p id="pjlink-password-status" class="muted"></p>
             </fieldset>
             <fieldset class="stack" id="display-saved-commands" hidden><legend>Power Commands</legend>
               <label>Payload Format<select name="format"><option value="hex">Hex</option><option value="text">UTF-8 Text</option></select></label>
@@ -281,7 +297,7 @@
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"scheduleenabled":true,"on":"07:00","off":"21:00"}</code> to set the display schedule.</dd>
               <dt>POST <code>/snapshot</code></dt><dd>Send <code>{}</code>. Save the response as a JPEG file.</dd>
               <dt>PUT <code>/settings</code></dt><dd>Send <code>{"identonboot":false}</code> for a black screen until playback starts at the next boot.</dd>
-              <dt>GET or PUT <code>/display-control</code></dt><dd>Read or save the power method. Use <code>cec</code>, <code>samsung</code>, <code>hybrid</code>, <code>tcp</code> or <code>udp</code>.</dd>
+              <dt>GET or PUT <code>/display-control</code></dt><dd>Read or save the power method. Use <code>cec</code>, <code>samsung</code>, <code>hybrid</code>, <code>sony</code>, <code>roku</code>, <code>sharp</code>, <code>pjlink</code>, <code>tcp</code> or <code>udp</code>.</dd>
               <dt>POST <code>/display-control/pair</code></dt><dd>Send <code>{}</code> and approve the pairing prompt on the Samsung TV.</dd>
               <dt>POST <code>/display-power</code></dt><dd>Send <code>{"power":"standby"}</code> or <code>{"power":"on"}</code>. Add <code>"via":"cec"</code> to use HDMI-CEC for this request.</dd>
               <dt>PUT <code>/preview-rotation</code></dt><dd>Send <code>{"player":"B","rotation":90}</code> to save the preview angle across the group.</dd>

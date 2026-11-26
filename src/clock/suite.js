@@ -6,6 +6,7 @@ const io = require('node:fs/promises');
 const net = require('node:net');
 const { isIP } = net;
 const dgram = require('node:dgram');
+const http = require('node:http');
 const https = require('node:https');
 const tls = require('node:tls');
 const { performance } = require('node:perf_hooks');
@@ -220,7 +221,9 @@ async function readJson(request, max = 8192) {
   return data;
 }
 
-const modes = ['cec', 'samsung', 'hybrid', 'tcp', 'udp'];
+const displayPorts = { sony: 20060, roku: 8060, sharp: 10002, pjlink: 4352 };
+const samsungModes = ['samsung', 'hybrid'];
+const modes = ['cec', ...samsungModes, ...Object.keys(displayPorts), 'tcp', 'udp'];
 const custom = ['tcp', 'udp'];
 const defaultDisplayControl = { mode: 'cec' };
 const bad = (message) => new RequestError(400, message);
@@ -249,10 +252,20 @@ function profile(body, current = defaultDisplayControl) {
   if (!modes.includes(body?.mode)) throw bad('Choose a Display Control Method.');
   const { mode } = body;
   if (mode === 'cec') return { ...current, mode };
-  const { address, port } = body;
+  const { address } = body;
+  const port = body.port ?? displayPorts[mode];
   if (!lanAddress(address)) throw bad('Enter the Display’s Private IPv4 Address.');
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad('Enter a Port from 1 to 65535.');
-  if (!custom.includes(mode)) {
+  if (mode === 'pjlink') {
+    const sameDisplay = current.address === address && current.port === port;
+    const password = body.password ?? (sameDisplay ? current.pjPassword : '') ?? '';
+    if (typeof password !== 'string' || !/^[a-z0-9]{0,32}$/i.test(password)) {
+      throw bad('Enter a PJLink Password of Up to 32 Letters and Numbers.');
+    }
+    return { mode, address, port, pjPassword: password };
+  }
+  if (Object.hasOwn(displayPorts, mode)) return { mode, address, port };
+  if (samsungModes.includes(mode)) {
     if (![1515, 1516].includes(port)) throw bad('Use Samsung IP Control Port 1516 or 1515.');
     const { token, fingerprint } = current;
     return { mode, address, port, ...(address === current.address && port === current.port && token && fingerprint ? { token, fingerprint } : {}) };
@@ -293,6 +306,81 @@ function transmit(settings, bytes) {
   });
 }
 
+function tcpDisplay(settings, terminator, start, receive) {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(settings.port, settings.address);
+    const unavailable = () => new RequestError(502, 'The Display Did Not Acknowledge the Command. Check Its Address, Port and Control Setting.');
+    const complete = (error) => {
+      clearTimeout(timer);
+      socket.destroy();
+      if (error) reject(error); else resolve();
+    };
+    const timer = setTimeout(() => complete(unavailable()), 4000);
+    let buffer = '';
+    socket.setEncoding('ascii');
+    socket.once('connect', () => { if (start) socket.write(start); });
+    socket.once('error', () => complete(unavailable()));
+    socket.once('close', () => complete(unavailable()));
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      if (buffer.length > 2048) return complete(unavailable());
+      for (let next; (next = buffer.indexOf(terminator)) >= 0;) {
+        const frame = buffer.slice(0, next);
+        buffer = buffer.slice(next + 1);
+        try {
+          if (receive(frame, socket)) return complete();
+        } catch (error) { return complete(error); }
+      }
+    });
+  });
+}
+
+function presetPower(settings, power) {
+  const state = power === 'on' ? '1' : '0';
+  if (settings.mode === 'pjlink') {
+    let greeted = false;
+    return tcpDisplay(settings, '\r', '', (frame, socket) => {
+      if (!greeted) {
+        const challenge = /^PJLINK 1 ([a-f0-9]{8})$/i.exec(frame);
+        if (frame !== 'PJLINK 0' && !challenge) throw new RequestError(502, 'The Display Returned an Unsupported PJLink Greeting.');
+        if (challenge && !settings.pjPassword) throw new RequestError(409, 'Enter the Display’s PJLink Password.');
+        const digest = challenge ? createHash('md5').update(challenge[1] + settings.pjPassword, 'ascii').digest('hex') : '';
+        greeted = true;
+        socket.write(`${digest}%1POWR ${state}\r`);
+        return false;
+      }
+      if (frame === 'PJLINK ERRA') throw new RequestError(409, 'The Display Rejected the PJLink Password.');
+      if (!/^%1POWR=OK$/i.test(frame)) throw new RequestError(502, 'The Display Rejected the PJLink Power Command.');
+      return true;
+    });
+  }
+  if (settings.mode === 'sony') {
+    return tcpDisplay(settings, '\n', `*SCPOWR${state.padStart(16, '0')}\n`, (frame) => {
+      if (!frame.startsWith('*SAPOWR')) return false;
+      if (frame !== '*SAPOWR0000000000000000') throw new RequestError(502, 'The Sony Display Rejected the Power Command.');
+      return true;
+    });
+  }
+  if (settings.mode === 'sharp') {
+    return tcpDisplay(settings, '\r', `POWR${state}   \r`, (frame) => {
+      if (frame !== 'OK') throw new RequestError(502, 'The Sharp Display Rejected the Power Command. Check Its IP Control Settings.');
+      return true;
+    });
+  }
+  return new Promise((resolve, reject) => {
+    const unavailable = () => new RequestError(502, 'Roku TV Did Not Accept Standby. Check Its Address and Control by Mobile Apps Setting.');
+    const request = http.request({ hostname: settings.address, port: settings.port, method: 'POST', path: '/keypress/PowerOff',
+      headers: { 'Content-Length': '0' } }, (response) => {
+      response.destroy();
+      if (response.statusCode >= 200 && response.statusCode < 300) resolve(); else reject(unavailable());
+    });
+    const timer = setTimeout(() => request.destroy(new Error('Roku TV command timed out')), 4000);
+    request.on('close', () => clearTimeout(timer));
+    request.on('error', () => reject(unavailable()));
+    request.end();
+  });
+}
+
 function samsungRpc(settings, method, params) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method, params });
@@ -329,7 +417,7 @@ function samsungRpc(settings, method, params) {
         try {
           const reply = JSON.parse(Buffer.concat(chunks).toString('utf8'));
           if (reply.error?.code === -32010) throw new RequestError(409, 'The Samsung TV Rejected Its Access Token. Pair Again.');
-          if (response.statusCode !== 200 || reply.id !== 1 || reply.error || !Object.hasOwn(reply, 'result')) {
+          if (response.statusCode !== 200 || ![1, '1'].includes(reply.id) || reply.error || !Object.hasOwn(reply, 'result')) {
             throw new RequestError(502, 'The Samsung TV Rejected the IP Control Command.');
           }
           resolve({ result: reply.result, fingerprint });
@@ -363,7 +451,7 @@ class DisplayControl {
   async init() {
     try {
       const saved = JSON.parse(await io.readFile(this.path, 'utf8'));
-      this.settings = profile(saved, saved);
+      this.settings = profile({ ...saved, password: saved.pjPassword }, saved);
       if (this.settings.mode !== 'cec' && this.reserved.has(this.settings.address)) this.settings = defaultDisplayControl;
     } catch (error) {
       if (error.code !== 'ENOENT') this.result = 'Display Control Settings Could Not Be Opened.';
@@ -371,8 +459,8 @@ class DisplayControl {
   }
 
   snapshot() {
-    const { token, fingerprint, ...settings } = this.settings;
-    return { ...settings, paired: Boolean(token && fingerprint), result: this.result };
+    const { token, fingerprint, pjPassword, ...settings } = this.settings;
+    return { ...settings, paired: Boolean(token && fingerprint), passwordSaved: Boolean(pjPassword), result: this.result };
   }
 
   async persist(settings) {
@@ -406,7 +494,7 @@ class DisplayControl {
 
   async pair() {
     const settings = this.settings;
-    if (!['samsung', 'hybrid'].includes(settings.mode)) throw bad('Save Samsung IP Control Settings First.');
+    if (!samsungModes.includes(settings.mode)) throw bad('Save Samsung IP Control Settings First.');
     return this.run(async () => {
       const { result, fingerprint } = await this.rpc({ ...settings, fingerprint: undefined }, 'createAccessToken');
       const token = result?.AccessToken;
@@ -421,7 +509,7 @@ class DisplayControl {
   async power(power, override) {
     if (!['on', 'standby'].includes(power) || (override !== undefined && override !== 'cec')) throw bad('Choose Power On or Standby.');
     const settings = this.settings;
-    const useCec = override === 'cec' || settings.mode === 'cec' || (settings.mode === 'hybrid' && power === 'on');
+    const useCec = override === 'cec' || settings.mode === 'cec' || (['hybrid', 'roku'].includes(settings.mode) && power === 'on');
     return this.run(async () => {
       if (useCec) {
         await this.cec(power === 'on');
@@ -429,6 +517,9 @@ class DisplayControl {
       } else if (custom.includes(settings.mode)) {
         await transmit(settings, commandBytes(settings[power], settings.format));
         this.result = 'Custom Display Command Sent.';
+      } else if (Object.hasOwn(displayPorts, settings.mode)) {
+        await presetPower(settings, power);
+        this.result = 'Display Accepted the Power Request.';
       } else {
         if (!settings.token || !settings.fingerprint) throw new RequestError(409, 'Pair With the Samsung TV First.');
         await this.rpc(settings, 'powerControl', { AccessToken: settings.token, power: power === 'on' ? 'powerOn' : 'powerOff' });
@@ -1299,4 +1390,4 @@ class Suite {
   }
 }
 
-module.exports = { Suite, DisplayControl, commandBytes, samsungRpc, colourValues, cpuSample, decoderTiming, networkProfile, networkTimeServer, playerLayout, readJson, rectangle, sanitiseSettings, sourceUrl };
+module.exports = { Suite, DisplayControl, commandBytes, presetPower, samsungRpc, colourValues, cpuSample, decoderTiming, networkProfile, networkTimeServer, playerLayout, readJson, rectangle, sanitiseSettings, sourceUrl };

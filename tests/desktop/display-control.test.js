@@ -3,12 +3,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const dgram = require('node:dgram');
+const http = require('node:http');
 const net = require('node:net');
 const { once } = require('node:events');
 const { mkdtemp, rm } = require('node:fs/promises');
 const { tmpdir } = require('node:os');
 const { join } = require('node:path');
-const { DisplayControl, Suite, commandBytes } = require('../../src/clock/suite');
+const { DisplayControl, Suite, commandBytes, presetPower } = require('../../src/clock/suite');
 
 test('pairs a Samsung, saves the pin privately, and routes hybrid wake through CEC', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'syncplayer-display-'));
@@ -108,4 +109,74 @@ test('preserves each preview angle when the shared layout changes and forwards f
   await suite.savePreviewRotation({ player: 'B', rotation: 180 });
   assert.equal(suite.layout().rotations.B, 180);
   assert.equal(suite.library.state.playerLayout.rotations.B, 90);
+});
+
+test('sends Sony, Sharp, Roku and authenticated PJLink power commands', async (t) => {
+  async function display(mode, handlers) {
+    const server = net.createServer((socket) => {
+      socket.setEncoding('ascii');
+      handlers.greeting?.(socket);
+      let received = '';
+      socket.on('data', (chunk) => {
+        received += chunk;
+        if (received.endsWith(handlers.terminator)) {
+          socket.end(handlers.response(received));
+        }
+      });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    t.after(() => server.close());
+    return { mode, address: '127.0.0.1', port: server.address().port };
+  }
+
+  const sony = await display('sony', { terminator: '\n', response(frame) {
+    assert.equal(frame, '*SCPOWR0000000000000001\n');
+    return '*SNPOWR0000000000000001\n*SAPOWR0000000000000000\n';
+  } });
+  await presetPower(sony, 'on');
+
+  const sharp = await display('sharp', { terminator: '\r', response(frame) {
+    assert.equal(frame, 'POWR0   \r');
+    return 'OK\r';
+  } });
+  await presetPower(sharp, 'standby');
+
+  const pjlink = await display('pjlink', { terminator: '\r', greeting(socket) {
+    socket.write('PJLINK 1 ');
+    setImmediate(() => socket.write('498e4a67\r'));
+  }, response(frame) {
+    assert.equal(frame, '5d8409bc1c3fa39749434aa3a5c38682%1POWR 1\r');
+    return '%1POWR=OK\r';
+  } });
+  await presetPower({ ...pjlink, pjPassword: 'JBMIAProjectorLink' }, 'on');
+
+  const roku = http.createServer((req, res) => {
+    assert.equal(req.method, 'POST');
+    assert.equal(req.url, '/keypress/PowerOff');
+    res.writeHead(200).end();
+  });
+  roku.listen(0, '127.0.0.1');
+  await once(roku, 'listening');
+  t.after(() => roku.close());
+  const driver = new DisplayControl('.', async (wake) => assert.equal(wake, true));
+  driver.settings = { mode: 'roku', address: '127.0.0.1', port: roku.address().port };
+  await driver.power('on');
+  await driver.power('standby');
+});
+
+test('saves PJLink passwords privately and clears them when requested', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'syncplayer-pjlink-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const control = new DisplayControl(root, () => {});
+  const profile = { mode: 'pjlink', address: '192.168.1.50' };
+  const saved = await control.configure({ ...profile, password: 'testPW' });
+  assert.equal(saved.port, 4352);
+  assert.equal(saved.passwordSaved, true);
+  assert.equal(saved.pjPassword, undefined);
+  const rebooted = new DisplayControl(root, () => {});
+  await rebooted.init();
+  assert.equal(rebooted.snapshot().passwordSaved, true);
+  assert.equal((await rebooted.configure(profile)).passwordSaved, true);
+  assert.equal((await rebooted.configure({ ...profile, password: '' })).passwordSaved, false);
 });
